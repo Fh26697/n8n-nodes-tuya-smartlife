@@ -1,4 +1,5 @@
 import {
+  IDataObject,
   IExecuteFunctions,
   INodeExecutionData,
   INodeType,
@@ -225,7 +226,7 @@ export class TuyaSmartLife implements INodeType {
           if (operation === 'getAll') {
             const devices = await client.getDevices();
             for (const device of devices) {
-              returnData.push({ json: device as unknown as Record<string, unknown> });
+              returnData.push({ json: device as unknown as IDataObject });
             }
           } else if (operation === 'getStatus') {
             const deviceId = this.getNodeParameter('deviceId', i) as string;
