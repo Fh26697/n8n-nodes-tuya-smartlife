@@ -68,7 +68,7 @@ export class TuyaApiClient {
         return {
           accessToken: r.access_token,
           refreshToken: r.refresh_token,
-          expireTime: (res.t as number) + r.expireTime * 1000,
+          expireTime: (res.t as number) + (r.expireTime ?? 7200) * 1000,
           uid: r.uid,
           terminalId: r.terminalId,
         };
@@ -130,13 +130,13 @@ export class TuyaApiClient {
     if (params && Object.keys(params).length > 0) {
       queryEncdata = aesGcmEncrypt(JSON.stringify(params), secret);
     }
-    const actualQueryParams: Record<string, string> = { encdata: queryEncdata };
+    const actualQueryParams: Record<string, string> = queryEncdata ? { encdata: queryEncdata } : {};
 
     let bodyEncdata = '';
     if (body && Object.keys(body).length > 0) {
       bodyEncdata = aesGcmEncrypt(JSON.stringify(body), secret);
     }
-    const actualBody = { encdata: bodyEncdata };
+    const actualBody: Record<string, string> = bodyEncdata ? { encdata: bodyEncdata } : {};
 
     const t = Date.now().toString();
     const headers: Record<string, string> = {
@@ -192,8 +192,8 @@ export class TuyaApiClient {
         'GET',
         `${this.endpoint}/v1.0/m/token/${this.tokenInfo.refreshToken}`,
         headers,
-        { encdata: '' },
-        { encdata: '' },
+        {},
+        {},
       );
 
       if (raw.success && typeof raw.result === 'string') {
@@ -201,7 +201,7 @@ export class TuyaApiClient {
         this.tokenInfo = {
           accessToken: r.accessToken,
           refreshToken: r.refreshToken,
-          expireTime: raw.t + r.expireTime * 1000,
+          expireTime: raw.t + (r.expireTime ?? 7200) * 1000,
           uid: r.uid ?? this.tokenInfo.uid,
           terminalId: this.tokenInfo.terminalId,
         };
