@@ -1,0 +1,45 @@
+{
+  "name": "n8n-nodes-tuya-smartlife",
+  "version": "0.1.0",
+  "description": "n8n community node for Tuya Smart Life — control devices without a developer account",
+  "keywords": [
+    "n8n-community-node-package",
+    "tuya",
+    "smart-life",
+    "iot",
+    "home-automation"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Fh26697"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fh26697/n8n-nodes-tuya-smartlife.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && cp nodes/TuyaSmartLife/tuya.svg dist/nodes/TuyaSmartLife/tuya.svg",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/TuyaSmartLifeApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/TuyaSmartLife/TuyaSmartLife.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "n8n-workflow": "*",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
