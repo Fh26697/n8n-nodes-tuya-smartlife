@@ -33,42 +33,5 @@ export class TuyaSmartLifeApi implements ICredentialType {
       default: 'eu',
       required: true,
     },
-    {
-      displayName: 'Access Token',
-      name: 'accessToken',
-      type: 'string',
-      typeOptions: { password: true },
-      default: '',
-      description: 'Set automatically after QR login — do not edit manually',
-    },
-    {
-      displayName: 'Refresh Token',
-      name: 'refreshToken',
-      type: 'string',
-      typeOptions: { password: true },
-      default: '',
-      description: 'Set automatically after QR login — do not edit manually',
-    },
-    {
-      displayName: 'Token Expire Time',
-      name: 'expireTime',
-      type: 'number',
-      default: 0,
-      description: 'Unix timestamp (ms) when the access token expires — set automatically',
-    },
-    {
-      displayName: 'User ID',
-      name: 'uid',
-      type: 'string',
-      default: '',
-      description: 'Set automatically after QR login',
-    },
-    {
-      displayName: 'Terminal ID',
-      name: 'terminalId',
-      type: 'string',
-      default: '',
-      description: 'Set automatically after QR login',
-    },
   ];
 }
