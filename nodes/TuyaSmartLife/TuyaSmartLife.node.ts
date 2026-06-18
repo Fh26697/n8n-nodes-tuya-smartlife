@@ -193,18 +193,18 @@ export class TuyaSmartLife implements INodeType {
         if (resource === 'setup') {
           if (operation === 'generateQRCode') {
             const qrResult = await client.generateQRCode(userCode);
-            const qrcodeData = qrResult.qrcode;
-            const token = qrResult.token;
+            // API returns "qrcode" field as the poll token; the deep-link the app scans is constructed here
+            const pollToken = qrResult.qrcode ?? qrResult.token;
+            const deepLink = `tuyaSmart--qrLogin?token=${pollToken}`;
 
-            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qrcodeData)}&size=300x300&format=png`;
+            const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(deepLink)}&size=300x300&format=png`;
             const qrImageDataUrl = await fetchQrImage(qrImageUrl);
 
             returnData.push({
               json: {
                 qrcode: qrImageDataUrl,
-                token,
-                qrcodeData,
-                hint: 'Scan the QR code with the Smart Life app, then use the "Complete Login" operation with the returned token.',
+                token: pollToken,
+                hint: 'Scan the QR code with the Smart Life app, then run "Complete Login" with the token value above.',
               },
             });
           } else if (operation === 'completeLogin') {
