@@ -42,6 +42,7 @@ Open the **Smart Life** app → tap **Me** (bottom right) → tap the ⚙️ gea
 **Step 2 — Create the credential**
 
 In n8n go to **Credentials → Add Credential → Tuya Smart Life API** and enter:
+- **App Client ID** — leave the pre-filled default as-is unless you have your own Tuya app registration
 - **User Code** — the code from Step 1
 - **Region** — select your region (EU / US / CN)
 
@@ -127,7 +128,6 @@ All cryptography uses **Node.js built-in `crypto` only** — no additional depen
 | What | Where |
 |---|---|
 | **Tuya Device Sharing SDK** (Python) — original signing implementation | https://github.com/tuya/tuya-device-sharing-sdk |
-| **Home Assistant Tuya Integration** — `CLIENT_ID` and `SCHEMA` constants | https://github.com/home-assistant/core/tree/dev/homeassistant/components/tuya |
 | **n8n Community Node API** | https://docs.n8n.io/integrations/creating-nodes/ |
 
 This node is an independent TypeScript re-implementation and is not affiliated with or endorsed by Tuya Inc. or the Home Assistant project.

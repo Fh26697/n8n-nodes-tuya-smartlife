@@ -173,6 +173,7 @@ export class TuyaSmartLife implements INodeType {
     const operation = this.getNodeParameter('operation', 0) as string;
 
     const creds = await this.getCredentials('tuyaSmartLifeApi');
+    const clientId = creds.clientId as string;
     const userCode = creds.userCode as string;
 
     const tokenInfo: TokenInfo | undefined = creds.accessToken
@@ -185,7 +186,7 @@ export class TuyaSmartLife implements INodeType {
         }
       : undefined;
 
-    const client = new TuyaApiClient(tokenInfo);
+    const client = new TuyaApiClient(clientId, tokenInfo);
 
     for (let i = 0; i < items.length; i++) {
       try {

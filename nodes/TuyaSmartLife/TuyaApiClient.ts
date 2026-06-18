@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import * as https from 'https';
 import { URL } from 'url';
-import { CLIENT_ID, SCHEMA, ENDPOINT, NONCE_CHARS } from './constants';
+import { SCHEMA, ENDPOINT, NONCE_CHARS } from './constants';
 
 export interface TokenInfo {
   accessToken: string;
@@ -32,8 +32,10 @@ export interface Command {
 export class TuyaApiClient {
   private tokenInfo: TokenInfo | null;
   private endpoint: string;
+  private clientId: string;
 
-  constructor(tokenInfo?: TokenInfo) {
+  constructor(clientId: string, tokenInfo?: TokenInfo) {
+    this.clientId = clientId;
     this.tokenInfo = tokenInfo ?? null;
     this.endpoint = ENDPOINT;
   }
@@ -42,7 +44,7 @@ export class TuyaApiClient {
 
   async generateQRCode(userCode: string): Promise<{ qrcode: string; token: string }> {
     const res = await this.request('POST', '/v1.0/m/life/home-assistant/qrcode/tokens', {
-      clientid: CLIENT_ID,
+      clientid: this.clientId,
       usercode: userCode,
       schema: SCHEMA,
     });
@@ -53,7 +55,7 @@ export class TuyaApiClient {
     const maxAttempts = 30;
     for (let i = 0; i < maxAttempts; i++) {
       const res = await this.request('GET', `/v1.0/m/life/home-assistant/qrcode/tokens/${token}`, {
-        clientid: CLIENT_ID,
+        clientid: this.clientId,
         usercode: userCode,
       });
       if (res.success && res.result) {
@@ -133,7 +135,7 @@ export class TuyaApiClient {
 
     const t = Date.now().toString();
     const headers: Record<string, string> = {
-      'X-appKey': CLIENT_ID,
+      'X-appKey': this.clientId,
       'X-requestId': rid,
       'X-sid': sid,
       'X-time': t,
@@ -173,7 +175,7 @@ export class TuyaApiClient {
       const bodyEncdata = '';
       const t = Date.now().toString();
       const headers: Record<string, string> = {
-        'X-appKey': CLIENT_ID,
+        'X-appKey': this.clientId,
         'X-requestId': rid,
         'X-sid': '',
         'X-time': t,
