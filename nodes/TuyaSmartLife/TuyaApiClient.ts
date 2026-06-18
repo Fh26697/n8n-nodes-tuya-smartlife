@@ -43,21 +43,26 @@ export class TuyaApiClient {
   // --- Public API methods ---
 
   async generateQRCode(userCode: string): Promise<{ qrcode: string; token: string }> {
-    const res = await this.request('POST', '/v1.0/m/life/home-assistant/qrcode/tokens', {
-      clientid: this.clientId,
-      usercode: userCode,
-      schema: SCHEMA,
-    });
+    // LoginControl flow: plain HTTP, no signing or encryption (per tuya-device-sharing-sdk/user.py)
+    const url = new URL(`${this.endpoint}/v1.0/m/life/home-assistant/qrcode/tokens`);
+    url.searchParams.set('clientid', this.clientId);
+    url.searchParams.set('usercode', userCode);
+    url.searchParams.set('schema', SCHEMA);
+    const res = await plainRequest('POST', url.toString());
+    if (!res.success) {
+      throw new Error(`Tuya API error (${res.code}): ${res.msg}`);
+    }
     return res.result as { qrcode: string; token: string };
   }
 
   async pollLoginResult(token: string, userCode: string): Promise<TokenInfo> {
+    // LoginControl flow: plain HTTP, no signing or encryption (per tuya-device-sharing-sdk/user.py)
     const maxAttempts = 30;
     for (let i = 0; i < maxAttempts; i++) {
-      const res = await this.request('GET', `/v1.0/m/life/home-assistant/qrcode/tokens/${token}`, {
-        clientid: this.clientId,
-        usercode: userCode,
-      });
+      const url = new URL(`${this.endpoint}/v1.0/m/life/home-assistant/qrcode/tokens/${token}`);
+      url.searchParams.set('clientid', this.clientId);
+      url.searchParams.set('usercode', userCode);
+      const res = await plainRequest('GET', url.toString());
       if (res.success && res.result) {
         const r = res.result as any;
         return {
@@ -320,6 +325,40 @@ function httpRequest(
     });
     req.on('error', reject);
     req.write(bodyStr);
+    req.end();
+  });
+}
+
+// Plain unauthenticated HTTP request — used for QR login flow (no signing/encryption)
+function plainRequest(method: string, url: string, jsonBody?: object): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const bodyStr = jsonBody ? JSON.stringify(jsonBody) : undefined;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (bodyStr) headers['Content-Length'] = String(Buffer.byteLength(bodyStr));
+
+    const options: https.RequestOptions = {
+      hostname: parsedUrl.hostname,
+      port: Number(parsedUrl.port) || 443,
+      path: parsedUrl.pathname + parsedUrl.search,
+      method: method.toUpperCase(),
+      headers,
+    };
+
+    const req = https.request(options, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error(`Non-JSON response (${res.statusCode}): ${body.slice(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
