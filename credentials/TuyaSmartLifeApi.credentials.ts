@@ -21,17 +21,5 @@ export class TuyaSmartLifeApi implements ICredentialType {
       required: true,
       description: 'Open Smart Life App → Me → ⚙️ → Account & Security → User Code',
     },
-    {
-      displayName: 'Region',
-      name: 'region',
-      type: 'options',
-      options: [
-        { name: 'Europe', value: 'eu' },
-        { name: 'United States', value: 'us' },
-        { name: 'China', value: 'cn' },
-      ],
-      default: 'eu',
-      required: true,
-    },
   ];
 }
