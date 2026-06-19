@@ -420,10 +420,42 @@ export class TuyaSmartLife implements INodeType {
             }
           } else if (operation === 'get') {
             const deviceId = this.getNodeParameter('deviceId', i) as string;
-            const device = await client.getDevice(deviceId);
+            const [device, specs] = await Promise.all([
+              client.getDevice(deviceId),
+              client.getDeviceSpecifications(deviceId),
+            ]);
             syncTokens();
             if (!device) throw new NodeOperationError(this.getNode(), `Device ${deviceId} not found`);
-            returnData.push({ json: device as unknown as IDataObject });
+
+            const specMap = new Map<string, { type: string; values: string }>();
+            for (const fn of [...(specs.functions ?? []), ...(specs.status ?? [])]) {
+              specMap.set(fn.code, fn);
+            }
+
+            const enrichedStatus = (device.status ?? []).map((s) => {
+              const spec = specMap.get(s.code);
+              if (!spec) return { code: s.code, value: s.value };
+              const entry: IDataObject = { code: s.code, type: spec.type };
+              try {
+                const desc = JSON.parse(spec.values);
+                if (spec.type === 'Integer' && typeof s.value === 'number') {
+                  const scale: number = desc.scale ?? 0;
+                  const factor = Math.pow(10, scale);
+                  entry.rawValue = s.value;
+                  entry.factor = factor;
+                  entry.value = scale > 0 ? s.value / factor : s.value;
+                  if (desc.unit) entry.unit = desc.unit;
+                } else {
+                  entry.value = s.value;
+                  if (desc.unit) entry.unit = desc.unit;
+                }
+              } catch {
+                entry.value = s.value;
+              }
+              return entry;
+            });
+
+            returnData.push({ json: { ...device, status: enrichedStatus } as unknown as IDataObject });
           }
 
         } else if (resource === 'device') {
