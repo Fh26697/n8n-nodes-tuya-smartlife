@@ -17,6 +17,7 @@ export interface Device {
   category: string;
   online: boolean;
   status: Status[];
+  homeId: string;
 }
 
 export interface Status {
@@ -79,18 +80,27 @@ export class TuyaApiClient {
   }
 
   async getDevices(): Promise<Device[]> {
-    const res = await this.request('GET', '/v1.0/m/life/ha/home/devices');
-    return (res.result as any[]).map((d: any) => ({
-      id: d.id,
-      name: d.name,
-      category: d.category,
-      online: d.online,
-      status: d.status ?? [],
-    }));
+    const homesRes = await this.request('GET', '/v1.0/m/life/ha/home/list');
+    const homes = (homesRes.result as any[]) ?? [];
+    const allDevices: Device[] = [];
+    for (const home of homes) {
+      const homeId: string = home.homeId ?? home.home_id ?? home.id;
+      const devRes = await this.request('GET', `/v1.0/m/life/ha/home/${homeId}/devices`);
+      const devices = ((devRes.result as any[]) ?? []).map((d: any) => ({
+        id: d.id,
+        name: d.name,
+        category: d.category,
+        online: d.online,
+        status: d.status ?? [],
+        homeId,
+      }));
+      allDevices.push(...devices);
+    }
+    return allDevices;
   }
 
   async getDeviceStatus(deviceId: string): Promise<Status[]> {
-    const res = await this.request('GET', `/v1.0/m/life/devices/${deviceId}/status`);
+    const res = await this.request('GET', `/v1.0/m/life/ha/devices/${deviceId}/status`);
     return res.result as Status[];
   }
 
