@@ -39,7 +39,7 @@ export class TuyaApiClient {
   constructor(clientId: string, tokenInfo?: TokenInfo) {
     this.clientId = clientId;
     this.tokenInfo = tokenInfo ?? null;
-    this.endpoint = tokenInfo?.endpoint || ENDPOINT;
+    this.endpoint = normalizeEndpoint(tokenInfo?.endpoint);
   }
 
   // --- Public API methods ---
@@ -67,13 +67,15 @@ export class TuyaApiClient {
       const res = await plainRequest('GET', url.toString());
       if (res.success && res.result) {
         const r = res.result as any;
+        // API returns snake_case on initial login; camelCase on refresh — handle both
+        const endpoint = normalizeEndpoint(r.endpoint);
         return {
-          accessToken: r.access_token,
-          refreshToken: r.refresh_token,
+          accessToken: r.access_token ?? r.accessToken ?? '',
+          refreshToken: r.refresh_token ?? r.refreshToken ?? '',
           expireTime: (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
-          uid: r.uid,
-          terminalId: r.terminalId,
-          endpoint: r.endpoint || ENDPOINT,
+          uid: r.uid ?? '',
+          terminalId: r.terminalId ?? r.terminal_id ?? '',
+          endpoint,
         };
       }
       await sleep(2000);
@@ -87,7 +89,7 @@ export class TuyaApiClient {
     const allDevices: Device[] = [];
     for (const home of homes) {
       const homeId: string = String(home.ownerId ?? home.homeId ?? home.home_id ?? home.id);
-      const devRes = await this.request('GET', '/v1.0/m/life/ha/home/devices', { home_id: homeId });
+      const devRes = await this.request('GET', '/v1.0/m/life/ha/home/devices', { homeId });
       const devices = ((devRes.result as any[]) ?? []).map((d: any) => ({
         id: d.id,
         name: d.name,
@@ -111,7 +113,7 @@ export class TuyaApiClient {
   }
 
   async logout(accessToken: string, terminalId: string): Promise<void> {
-    await this.request('GET', '/v1.0/m/token/terminal/expire', undefined, { accessToken, terminalId });
+    await this.request('POST', '/v1.0/m/token/terminal/expire', undefined, { accessToken, terminalId });
   }
 
   getTokenInfo(): TokenInfo | null {
@@ -223,6 +225,16 @@ export class TuyaApiClient {
       // Continue with existing token on refresh failure
     }
   }
+}
+
+// --- Helper functions ---
+
+function normalizeEndpoint(endpoint: string | undefined): string {
+  if (!endpoint) return ENDPOINT;
+  // Ensure https:// prefix
+  if (!endpoint.startsWith('http')) endpoint = 'https://' + endpoint;
+  // Remove trailing slash so paths starting with / don't produce double-slash
+  return endpoint.replace(/\/+$/, '');
 }
 
 // --- Crypto helpers ---

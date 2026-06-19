@@ -182,18 +182,31 @@ export class TuyaSmartLife implements INodeType {
     const creds = await this.getCredentials('tuyaSmartLifeApi');
     const clientId = creds.clientId as string;
     const userCode = creds.userCode as string;
+    const apiRegion = (creds.apiRegion as string) || 'auto';
+    const customEndpoint = (creds.customEndpoint as string) || '';
 
-    // Tokens are stored in workflow static data — persisted automatically by n8n
-    const staticData = this.getWorkflowStaticData('node');
+    // Resolve endpoint override from credentials (overrides the stored login endpoint)
+    let endpointOverride: string | undefined;
+    if (apiRegion !== 'auto') {
+      endpointOverride = apiRegion === 'custom' ? customEndpoint : apiRegion;
+    }
 
-    const tokenInfo: TokenInfo | undefined = staticData.accessToken
+    // Tokens are stored in workflow-global static data so any node in the workflow
+    // can access them (not just the node that ran the login). Keys are namespaced
+    // by userCode so multiple accounts in the same workflow don't collide.
+    const staticData = this.getWorkflowStaticData('global');
+    const p = `tuya_${userCode}_`; // namespace prefix
+
+    const storedEndpoint = endpointOverride || (staticData[`${p}endpoint`] as string) || '';
+
+    const tokenInfo: TokenInfo | undefined = staticData[`${p}accessToken`]
       ? {
-          accessToken: staticData.accessToken as string,
-          refreshToken: staticData.refreshToken as string,
-          expireTime: (staticData.expireTime as number) || 0,
-          uid: staticData.uid as string,
-          terminalId: staticData.terminalId as string,
-          endpoint: (staticData.endpoint as string) || '',
+          accessToken: staticData[`${p}accessToken`] as string,
+          refreshToken: staticData[`${p}refreshToken`] as string,
+          expireTime: (staticData[`${p}expireTime`] as number) || 0,
+          uid: staticData[`${p}uid`] as string,
+          terminalId: staticData[`${p}terminalId`] as string,
+          endpoint: storedEndpoint,
         }
       : undefined;
 
@@ -203,12 +216,12 @@ export class TuyaSmartLife implements INodeType {
     const syncTokens = () => {
       const t = client.getTokenInfo();
       if (t) {
-        staticData.accessToken = t.accessToken;
-        staticData.refreshToken = t.refreshToken;
-        staticData.expireTime = t.expireTime;
-        staticData.uid = t.uid;
-        staticData.terminalId = t.terminalId;
-        staticData.endpoint = t.endpoint;
+        staticData[`${p}accessToken`] = t.accessToken;
+        staticData[`${p}refreshToken`] = t.refreshToken;
+        staticData[`${p}expireTime`] = t.expireTime;
+        staticData[`${p}uid`] = t.uid;
+        staticData[`${p}terminalId`] = t.terminalId;
+        staticData[`${p}endpoint`] = t.endpoint;
       }
     };
 
@@ -244,19 +257,20 @@ export class TuyaSmartLife implements INodeType {
             const qrToken = this.getNodeParameter('qrToken', i) as string;
             const loginResult = await client.pollLoginResult(qrToken, userCode);
 
-            // Persist tokens in workflow static data
-            staticData.accessToken = loginResult.accessToken;
-            staticData.refreshToken = loginResult.refreshToken;
-            staticData.expireTime = loginResult.expireTime;
-            staticData.uid = loginResult.uid;
-            staticData.terminalId = loginResult.terminalId;
-            staticData.endpoint = loginResult.endpoint;
+            // Persist tokens in workflow-global static data
+            staticData[`${p}accessToken`] = loginResult.accessToken;
+            staticData[`${p}refreshToken`] = loginResult.refreshToken;
+            staticData[`${p}expireTime`] = loginResult.expireTime;
+            staticData[`${p}uid`] = loginResult.uid;
+            staticData[`${p}terminalId`] = loginResult.terminalId;
+            staticData[`${p}endpoint`] = loginResult.endpoint;
 
             returnData.push({
               json: {
                 success: true,
                 uid: loginResult.uid,
                 terminalId: loginResult.terminalId,
+                endpoint: loginResult.endpoint,
                 expiresAt: loginResult.expireTime
                   ? new Date(loginResult.expireTime).toISOString()
                   : 'unknown',
@@ -265,13 +279,16 @@ export class TuyaSmartLife implements INodeType {
             });
 
           } else if (operation === 'loginStatus') {
-            const hasToken = !!staticData.accessToken;
-            const expireTime = staticData.expireTime as number | undefined;
+            const hasToken = !!(staticData[`${p}accessToken`]);
+            const expireTime = staticData[`${p}expireTime`] as number | undefined;
+            const effectiveEndpoint = endpointOverride || (staticData[`${p}endpoint`] as string) || null;
             returnData.push({
               json: {
                 loggedIn: hasToken,
-                uid: (staticData.uid as string) || null,
-                terminalId: (staticData.terminalId as string) || null,
+                uid: (staticData[`${p}uid`] as string) || null,
+                terminalId: (staticData[`${p}terminalId`] as string) || null,
+                endpoint: effectiveEndpoint,
+                endpointSource: endpointOverride ? 'credentials override' : 'login response',
                 expiresAt: expireTime ? new Date(expireTime).toISOString() : null,
                 isExpired: expireTime ? expireTime < Date.now() : null,
               },

@@ -21,5 +21,29 @@ export class TuyaSmartLifeApi implements ICredentialType {
       required: true,
       description: 'Open Smart Life App → Me → ⚙️ → Account & Security → User Code',
     },
+    {
+      displayName: 'API Region',
+      name: 'apiRegion',
+      type: 'options',
+      default: 'auto',
+      description: 'Select your Tuya account region. Use "Auto-detect" first — override only if Get Devices returns Not Found. Check the endpoint shown by "Show Login Status" to confirm.',
+      options: [
+        { name: 'Auto-detect (from login response)', value: 'auto' },
+        { name: 'China', value: 'https://apigw.iotbing.com' },
+        { name: 'Central Europe', value: 'https://apigw.tuyaeu.com' },
+        { name: 'Western America', value: 'https://apigw.tuyaus.com' },
+        { name: 'India', value: 'https://apigw.tuyain.com' },
+        { name: 'Custom (see below)', value: 'custom' },
+      ],
+    },
+    {
+      displayName: 'Custom API Endpoint',
+      name: 'customEndpoint',
+      type: 'string',
+      default: '',
+      placeholder: 'https://apigw.example.com',
+      description: 'Custom API gateway URL. Only used when API Region is set to "Custom".',
+      displayOptions: { show: { apiRegion: ['custom'] } },
+    },
   ];
 }
