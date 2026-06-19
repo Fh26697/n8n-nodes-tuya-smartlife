@@ -8,7 +8,50 @@ import {
   IBinaryData,
 } from 'n8n-workflow';
 import * as https from 'https';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TuyaApiClient, TokenInfo, Command } from './TuyaApiClient';
+
+// File-based token storage — persists across workflows, executions and n8n restarts
+function tokenFilePath(): string {
+  const base =
+    process.env.N8N_USER_FOLDER ||
+    (process.env.HOME ? path.join(process.env.HOME, '.n8n') : '/tmp');
+  return path.join(base, 'tuya-smartlife-tokens.json');
+}
+
+function loadTokens(): Record<string, TokenInfo> {
+  try {
+    const raw = fs.readFileSync(tokenFilePath(), 'utf8');
+    return JSON.parse(raw) as Record<string, TokenInfo>;
+  } catch {
+    return {};
+  }
+}
+
+function saveTokens(all: Record<string, TokenInfo>): void {
+  try {
+    fs.writeFileSync(tokenFilePath(), JSON.stringify(all, null, 2), 'utf8');
+  } catch {
+    // non-fatal — worst case login must be re-run
+  }
+}
+
+function readToken(userCode: string): TokenInfo | undefined {
+  return loadTokens()[userCode];
+}
+
+function writeToken(userCode: string, info: TokenInfo): void {
+  const all = loadTokens();
+  all[userCode] = info;
+  saveTokens(all);
+}
+
+function deleteToken(userCode: string): void {
+  const all = loadTokens();
+  delete all[userCode];
+  saveTokens(all);
+}
 
 // Fetch QR code image from URL, following up to 3 redirects, returns data URL
 function fetchQrImage(url: string, redirectsLeft = 3): Promise<string> {
@@ -191,38 +234,21 @@ export class TuyaSmartLife implements INodeType {
       endpointOverride = apiRegion === 'custom' ? customEndpoint : apiRegion;
     }
 
-    // Tokens are stored in workflow-global static data so any node in the workflow
-    // can access them (not just the node that ran the login). Keys are namespaced
-    // by userCode so multiple accounts in the same workflow don't collide.
-    const staticData = this.getWorkflowStaticData('global');
-    const p = `tuya_${userCode}_`; // namespace prefix
+    // Load tokens from file — persists across workflows, executions and n8n restarts.
+    // The file is keyed by userCode so multiple accounts don't collide.
+    const stored = readToken(userCode);
+    const storedEndpoint = endpointOverride || stored?.endpoint || '';
 
-    const storedEndpoint = endpointOverride || (staticData[`${p}endpoint`] as string) || '';
-
-    const tokenInfo: TokenInfo | undefined = staticData[`${p}accessToken`]
-      ? {
-          accessToken: staticData[`${p}accessToken`] as string,
-          refreshToken: staticData[`${p}refreshToken`] as string,
-          expireTime: (staticData[`${p}expireTime`] as number) || 0,
-          uid: staticData[`${p}uid`] as string,
-          terminalId: staticData[`${p}terminalId`] as string,
-          endpoint: storedEndpoint,
-        }
+    const tokenInfo: TokenInfo | undefined = stored?.accessToken
+      ? { ...stored, endpoint: storedEndpoint }
       : undefined;
 
     const client = new TuyaApiClient(clientId, tokenInfo);
 
-    // Save tokens back to static data after any call that may have refreshed them
+    // Persist any token refresh back to disk
     const syncTokens = () => {
       const t = client.getTokenInfo();
-      if (t) {
-        staticData[`${p}accessToken`] = t.accessToken;
-        staticData[`${p}refreshToken`] = t.refreshToken;
-        staticData[`${p}expireTime`] = t.expireTime;
-        staticData[`${p}uid`] = t.uid;
-        staticData[`${p}terminalId`] = t.terminalId;
-        staticData[`${p}endpoint`] = t.endpoint;
-      }
+      if (t) writeToken(userCode, t);
     };
 
     for (let i = 0; i < items.length; i++) {
@@ -257,13 +283,8 @@ export class TuyaSmartLife implements INodeType {
             const qrToken = this.getNodeParameter('qrToken', i) as string;
             const loginResult = await client.pollLoginResult(qrToken, userCode);
 
-            // Persist tokens in workflow-global static data
-            staticData[`${p}accessToken`] = loginResult.accessToken;
-            staticData[`${p}refreshToken`] = loginResult.refreshToken;
-            staticData[`${p}expireTime`] = loginResult.expireTime;
-            staticData[`${p}uid`] = loginResult.uid;
-            staticData[`${p}terminalId`] = loginResult.terminalId;
-            staticData[`${p}endpoint`] = loginResult.endpoint;
+            // Persist tokens to file so any workflow can use them
+            writeToken(userCode, loginResult);
 
             returnData.push({
               json: {
@@ -271,6 +292,7 @@ export class TuyaSmartLife implements INodeType {
                 uid: loginResult.uid,
                 terminalId: loginResult.terminalId,
                 endpoint: loginResult.endpoint,
+                tokenFile: tokenFilePath(),
                 expiresAt: loginResult.expireTime
                   ? new Date(loginResult.expireTime).toISOString()
                   : 'unknown',
@@ -279,18 +301,18 @@ export class TuyaSmartLife implements INodeType {
             });
 
           } else if (operation === 'loginStatus') {
-            const hasToken = !!(staticData[`${p}accessToken`]);
-            const expireTime = staticData[`${p}expireTime`] as number | undefined;
-            const effectiveEndpoint = endpointOverride || (staticData[`${p}endpoint`] as string) || null;
+            const token = readToken(userCode);
+            const effectiveEndpoint = endpointOverride || token?.endpoint || null;
             returnData.push({
               json: {
-                loggedIn: hasToken,
-                uid: (staticData[`${p}uid`] as string) || null,
-                terminalId: (staticData[`${p}terminalId`] as string) || null,
+                loggedIn: !!(token?.accessToken),
+                uid: token?.uid || null,
+                terminalId: token?.terminalId || null,
                 endpoint: effectiveEndpoint,
                 endpointSource: endpointOverride ? 'credentials override' : 'login response',
-                expiresAt: expireTime ? new Date(expireTime).toISOString() : null,
-                isExpired: expireTime ? expireTime < Date.now() : null,
+                tokenFile: tokenFilePath(),
+                expiresAt: token?.expireTime ? new Date(token.expireTime).toISOString() : null,
+                isExpired: token?.expireTime ? token.expireTime < Date.now() : null,
               },
             });
           }
