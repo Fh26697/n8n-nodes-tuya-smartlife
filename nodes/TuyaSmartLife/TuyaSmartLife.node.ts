@@ -220,7 +220,7 @@ export class TuyaSmartLife implements INodeType {
         type: 'fixedCollection',
         typeOptions: { multipleValues: true, minValue: 1 },
         required: true,
-        default: { commands: [{ code: '', value: '' }] },
+        default: { commands: [{ code: '', valueType: 'boolean', valueBoolean: false, valueText: '' }] },
         description: 'Commands to send. Click "Refresh" on the Code dropdown to load available commands for this device.',
         displayOptions: { show: { resource: ['device'], operation: ['sendCommand'] } },
         options: [
@@ -237,11 +237,31 @@ export class TuyaSmartLife implements INodeType {
                 description: 'Command code — click refresh to load from the device\'s available functions',
               },
               {
+                displayName: 'Value Type',
+                name: 'valueType',
+                type: 'options',
+                options: [
+                  { name: 'Boolean (Ein/Aus-Schalter)', value: 'boolean' },
+                  { name: 'Text / Zahl / Enum', value: 'text' },
+                ],
+                default: 'boolean',
+                description: 'Boolean for on/off switches; Text for numbers, enums, or strings',
+              },
+              {
                 displayName: 'Value',
-                name: 'value',
+                name: 'valueBoolean',
+                type: 'boolean',
+                default: false,
+                description: 'true = on / einschalten, false = off / ausschalten',
+                displayOptions: { show: { valueType: ['boolean'] } },
+              },
+              {
+                displayName: 'Value',
+                name: 'valueText',
                 type: 'string',
                 default: '',
-                description: 'Value to send. Boolean: true/false — Integer: number — Enum: one of the allowed values shown in the Code dropdown description',
+                description: 'For integers enter a number (e.g. 500), for enums one of the allowed values shown in the Code description',
+                displayOptions: { show: { valueType: ['text'] } },
               },
             ],
           },
@@ -408,11 +428,11 @@ export class TuyaSmartLife implements INodeType {
         } else if (resource === 'device') {
           if (operation === 'sendCommand') {
             const deviceId = this.getNodeParameter('deviceId', i) as string;
-            const uiCommands = (this.getNodeParameter('commandsUi.commands', i, []) as Array<{ code: string; value: string }>);
+            const uiCommands = (this.getNodeParameter('commandsUi.commands', i, []) as Array<{ code: string; valueType: string; valueBoolean: boolean; valueText: string }>);
 
             const commands: Command[] = uiCommands.map((item) => ({
               code: item.code,
-              value: parseCommandValue(item.value),
+              value: item.valueType === 'boolean' ? item.valueBoolean : parseCommandValue(item.valueText ?? ''),
             }));
 
             await client.sendCommand(deviceId, commands);
