@@ -50,7 +50,7 @@ export class TuyaApiClient {
     url.searchParams.set('schema', SCHEMA);
     const res = await plainRequest('POST', url.toString());
     if (!res.success) {
-      throw new Error(`Tuya API error (${res.code}): ${res.msg}`);
+      throw new Error(`Tuya API error (${res.code ?? '?'}): ${res.msg ?? JSON.stringify(res)}`);
     }
     return res.result as { qrcode: string; token: string };
   }
@@ -153,7 +153,7 @@ export class TuyaApiClient {
     const raw = await httpRequest(method, this.endpoint + path, headers, actualQueryParams, actualBody);
 
     if (!raw.success) {
-      throw new Error(`Tuya API error (${raw.code}): ${raw.msg}`);
+      throw new Error(`Tuya API error (${raw.code ?? raw.status ?? '?'}): ${raw.msg ?? raw.message ?? JSON.stringify(raw)}`);
     }
 
     if (typeof raw.result === 'string' && raw.result.length > 0) {
