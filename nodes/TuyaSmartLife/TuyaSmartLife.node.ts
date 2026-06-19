@@ -192,6 +192,7 @@ export class TuyaSmartLife implements INodeType {
           expireTime: (staticData.expireTime as number) || 0,
           uid: staticData.uid as string,
           terminalId: staticData.terminalId as string,
+          endpoint: (staticData.endpoint as string) || '',
         }
       : undefined;
 
@@ -206,6 +207,7 @@ export class TuyaSmartLife implements INodeType {
         staticData.expireTime = t.expireTime;
         staticData.uid = t.uid;
         staticData.terminalId = t.terminalId;
+        staticData.endpoint = t.endpoint;
       }
     };
 
@@ -239,6 +241,7 @@ export class TuyaSmartLife implements INodeType {
             staticData.expireTime = loginResult.expireTime;
             staticData.uid = loginResult.uid;
             staticData.terminalId = loginResult.terminalId;
+            staticData.endpoint = loginResult.endpoint;
 
             returnData.push({
               json: {

@@ -9,6 +9,7 @@ export interface TokenInfo {
   expireTime: number; // absolute ms timestamp
   uid: string;
   terminalId: string;
+  endpoint: string; // returned by login response, varies per user/region
 }
 
 export interface Device {
@@ -38,7 +39,7 @@ export class TuyaApiClient {
   constructor(clientId: string, tokenInfo?: TokenInfo) {
     this.clientId = clientId;
     this.tokenInfo = tokenInfo ?? null;
-    this.endpoint = ENDPOINT;
+    this.endpoint = tokenInfo?.endpoint || ENDPOINT;
   }
 
   // --- Public API methods ---
@@ -72,6 +73,7 @@ export class TuyaApiClient {
           expireTime: (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
           uid: r.uid,
           terminalId: r.terminalId,
+          endpoint: r.endpoint || ENDPOINT,
         };
       }
       await sleep(2000);
@@ -84,7 +86,7 @@ export class TuyaApiClient {
     const homes = (homesRes.result as any[]) ?? [];
     const allDevices: Device[] = [];
     for (const home of homes) {
-      const homeId: string = String(home.homeId ?? home.home_id ?? home.id);
+      const homeId: string = String(home.ownerId ?? home.homeId ?? home.home_id ?? home.id);
       const devRes = await this.request('GET', '/v1.0/m/life/ha/home/devices', { home_id: homeId });
       const devices = ((devRes.result as any[]) ?? []).map((d: any) => ({
         id: d.id,
@@ -214,6 +216,7 @@ export class TuyaApiClient {
           expireTime: raw.t + (r.expireTime ?? 7200) * 1000,
           uid: r.uid ?? this.tokenInfo.uid,
           terminalId: this.tokenInfo.terminalId,
+          endpoint: this.tokenInfo.endpoint,
         };
       }
     } catch {
