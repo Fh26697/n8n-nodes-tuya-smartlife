@@ -69,7 +69,7 @@ export class TuyaApiClient {
         return {
           accessToken: r.access_token,
           refreshToken: r.refresh_token,
-          expireTime: (res.t as number) + (r.expireTime ?? 7200) * 1000,
+          expireTime: (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
           uid: r.uid,
           terminalId: r.terminalId,
         };
@@ -306,12 +306,13 @@ function httpRequest(
         parsedUrl.searchParams.set(k, v);
       }
     }
-    const bodyStr = JSON.stringify(jsonBody ?? {});
-    const reqHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Content-Length': String(Buffer.byteLength(bodyStr)),
-      ...headers,
-    };
+    const hasBody = jsonBody != null && Object.keys(jsonBody).length > 0;
+    const bodyStr = hasBody ? JSON.stringify(jsonBody) : '';
+    const reqHeaders: Record<string, string> = { ...headers };
+    if (hasBody) {
+      reqHeaders['Content-Type'] = 'application/json';
+      reqHeaders['Content-Length'] = String(Buffer.byteLength(bodyStr));
+    }
 
     const options: https.RequestOptions = {
       hostname: parsedUrl.hostname,
@@ -334,7 +335,7 @@ function httpRequest(
       });
     });
     req.on('error', reject);
-    req.write(bodyStr);
+    if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
