@@ -5,6 +5,7 @@ import {
   INodeType,
   INodeTypeDescription,
   NodeOperationError,
+  IBinaryData,
 } from 'n8n-workflow';
 import * as https from 'https';
 import { TuyaApiClient, TokenInfo, Command } from './TuyaApiClient';
@@ -222,13 +223,21 @@ export class TuyaSmartLife implements INodeType {
 
             const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(deepLink)}&size=300x300&format=png`;
             const qrImageDataUrl = await fetchQrImage(qrImageUrl);
+            const base64Data = qrImageDataUrl.replace(/^data:image\/png;base64,/, '');
+
+            const binaryData: IBinaryData = {
+              data: base64Data,
+              mimeType: 'image/png',
+              fileName: 'qrcode.png',
+              fileExtension: 'png',
+            };
 
             returnData.push({
               json: {
-                qrcode: qrImageDataUrl,
                 token: pollToken,
                 hint: 'Scan the QR code with the Smart Life app, then run "Complete Login" with the token value above.',
               },
+              binary: { qrcode: binaryData },
             });
 
           } else if (operation === 'completeLogin') {
