@@ -1,7 +1,9 @@
 import {
   IDataObject,
   IExecuteFunctions,
+  ILoadOptionsFunctions,
   INodeExecutionData,
+  INodePropertyOptions,
   INodeType,
   INodeTypeDescription,
   NodeOperationError,
@@ -51,6 +53,15 @@ function deleteToken(userCode: string): void {
   const all = loadTokens();
   delete all[userCode];
   saveTokens(all);
+}
+
+// Convert the string value from the UI to the correct JS type for the Tuya API
+function parseCommandValue(v: string): boolean | number | string {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  const trimmed = v.trim();
+  if (trimmed !== '' && !isNaN(Number(trimmed))) return Number(trimmed);
+  return v;
 }
 
 // Fetch QR code image from URL, following up to 3 redirects, returns data URL
@@ -204,15 +215,78 @@ export class TuyaSmartLife implements INodeType {
         displayOptions: { show: { resource: ['device'], operation: ['sendCommand'] } },
       },
       {
-        displayName: 'Commands (JSON)',
-        name: 'commands',
-        type: 'string',
-        default: '[{"code":"switch_1","value":true}]',
+        displayName: 'Commands',
+        name: 'commandsUi',
+        type: 'fixedCollection',
+        typeOptions: { multipleValues: true, minValue: 1 },
         required: true,
-        description: 'JSON array of commands, e.g. [{"code":"switch_1","value":true}]',
+        default: { commands: [{ code: '', value: '' }] },
+        description: 'Commands to send. Click "Refresh" on the Code dropdown to load available commands for this device.',
         displayOptions: { show: { resource: ['device'], operation: ['sendCommand'] } },
+        options: [
+          {
+            displayName: 'Command',
+            name: 'commands',
+            values: [
+              {
+                displayName: 'Code',
+                name: 'code',
+                type: 'options',
+                typeOptions: { loadOptionsMethod: 'getDeviceCommands' },
+                default: '',
+                description: 'Command code — click refresh to load from the device\'s available functions',
+              },
+              {
+                displayName: 'Value',
+                name: 'value',
+                type: 'string',
+                default: '',
+                description: 'Value to send. Boolean: true/false — Integer: number — Enum: one of the allowed values shown in the Code dropdown description',
+              },
+            ],
+          },
+        ],
       },
     ],
+  };
+
+  methods = {
+    loadOptions: {
+      async getDeviceCommands(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+        const creds = await this.getCredentials('tuyaSmartLifeApi');
+        const clientId = creds.clientId as string;
+        const userCode = creds.userCode as string;
+        const deviceId = this.getNodeParameter('deviceId', 0) as string;
+
+        if (!deviceId) throw new Error('Enter a Device ID first, then refresh this list.');
+
+        const stored = readToken(userCode);
+        if (!stored?.accessToken) throw new Error('Not logged in — run Setup > Complete Login first.');
+
+        const client = new TuyaApiClient(clientId, stored);
+        const specs = await client.getDeviceSpecifications(deviceId);
+
+        if (!specs.functions?.length) {
+          return [{ name: '(no functions returned by API)', value: '' }];
+        }
+
+        return specs.functions.map((fn) => {
+          let hint = fn.type;
+          try {
+            const v = JSON.parse(fn.values);
+            if (fn.type === 'Boolean') hint = 'Boolean: true / false';
+            else if (fn.type === 'Integer') hint = `Integer ${v.min ?? ''}–${v.max ?? ''} step ${v.step ?? 1}`;
+            else if (fn.type === 'Enum' && v.range) hint = `Enum: ${(v.range as string[]).join(' | ')}`;
+            else if (fn.type === 'String') hint = `String max ${v.maxlen ?? '?'} chars`;
+          } catch { /* leave raw hint */ }
+          return {
+            name: `${fn.code}  [${hint}]`,
+            value: fn.code,
+            description: fn.values,
+          };
+        });
+      },
+    },
   };
 
   async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
@@ -334,18 +408,12 @@ export class TuyaSmartLife implements INodeType {
         } else if (resource === 'device') {
           if (operation === 'sendCommand') {
             const deviceId = this.getNodeParameter('deviceId', i) as string;
-            const commandsRaw = this.getNodeParameter('commands', i) as string;
+            const uiCommands = (this.getNodeParameter('commandsUi.commands', i, []) as Array<{ code: string; value: string }>);
 
-            let commands: Command[];
-            try {
-              commands = JSON.parse(commandsRaw) as Command[];
-            } catch {
-              throw new NodeOperationError(
-                this.getNode(),
-                `Invalid JSON in Commands parameter: ${commandsRaw}`,
-                { itemIndex: i },
-              );
-            }
+            const commands: Command[] = uiCommands.map((item) => ({
+              code: item.code,
+              value: parseCommandValue(item.value),
+            }));
 
             await client.sendCommand(deviceId, commands);
             syncTokens();

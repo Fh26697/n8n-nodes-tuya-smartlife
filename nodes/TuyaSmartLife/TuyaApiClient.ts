@@ -31,6 +31,12 @@ export interface Command {
   value: boolean | number | string;
 }
 
+export interface FunctionSpec {
+  code: string;
+  type: string;   // 'Boolean' | 'Integer' | 'Enum' | 'String' | 'Json'
+  values: string; // JSON string describing allowed values / range
+}
+
 export class TuyaApiClient {
   private tokenInfo: TokenInfo | null;
   private endpoint: string;
@@ -106,6 +112,11 @@ export class TuyaApiClient {
   async getDeviceStatus(deviceId: string): Promise<Status[]> {
     const res = await this.request('GET', `/v1.0/m/life/devices/${deviceId}/status`);
     return res.result as Status[];
+  }
+
+  async getDeviceSpecifications(deviceId: string): Promise<{ functions: FunctionSpec[]; status: FunctionSpec[] }> {
+    const res = await this.request('GET', `/v1.1/m/life/${deviceId}/specifications`);
+    return (res.result ?? { functions: [], status: [] }) as { functions: FunctionSpec[]; status: FunctionSpec[] };
   }
 
   async sendCommand(deviceId: string, commands: Command[]): Promise<void> {
