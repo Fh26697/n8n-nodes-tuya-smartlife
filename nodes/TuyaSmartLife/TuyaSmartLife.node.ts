@@ -170,10 +170,10 @@ export class TuyaSmartLife implements INodeType {
             action: 'Get all devices',
           },
           {
-            name: 'Get Status',
-            value: 'getStatus',
-            description: 'Get the current status of a device',
-            action: 'Get device status',
+            name: 'Get',
+            value: 'get',
+            description: 'Get a single device with its current live values',
+            action: 'Get device',
           },
         ],
         default: 'getAll',
@@ -185,7 +185,7 @@ export class TuyaSmartLife implements INodeType {
         default: '',
         required: true,
         description: 'The ID of the device',
-        displayOptions: { show: { resource: ['devices'], operation: ['getStatus'] } },
+        displayOptions: { show: { resource: ['devices'], operation: ['get'] } },
       },
 
       // ── Device operations ─────────────────────────────────────────────────
@@ -418,11 +418,12 @@ export class TuyaSmartLife implements INodeType {
             for (const device of devices) {
               returnData.push({ json: device as unknown as IDataObject });
             }
-          } else if (operation === 'getStatus') {
+          } else if (operation === 'get') {
             const deviceId = this.getNodeParameter('deviceId', i) as string;
-            const statuses = await client.getDeviceStatus(deviceId);
+            const device = await client.getDevice(deviceId);
             syncTokens();
-            returnData.push({ json: { deviceId, status: statuses } });
+            if (!device) throw new NodeOperationError(this.getNode(), `Device ${deviceId} not found`);
+            returnData.push({ json: device as unknown as IDataObject });
           }
 
         } else if (resource === 'device') {

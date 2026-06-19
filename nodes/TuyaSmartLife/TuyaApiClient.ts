@@ -89,6 +89,11 @@ export class TuyaApiClient {
     throw new Error('QR login timed out — please scan within 60 seconds');
   }
 
+  async getDevice(deviceId: string): Promise<Device | undefined> {
+    const devices = await this.getDevices();
+    return devices.find((d) => d.id === deviceId);
+  }
+
   async getDevices(): Promise<Device[]> {
     const homesRes = await this.request('GET', '/v1.0/m/life/users/homes');
     const homes = (homesRes.result as any[]) ?? [];
