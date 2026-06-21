@@ -104,25 +104,11 @@ export class TuyaApiClient {
 
   // --- Public API methods ---
 
-  // Return the correct apigw.* auth gateway for QR login.
-  // The stored API endpoint (m.smart321.com, a.tuyaeu.com, …) is the SIGNED-API host;
-  // QR code generation must go to apigw.* instead.
-  private getAuthGateway(): string {
-    const h = this.endpoint.replace(/^https?:\/\//, '').toLowerCase();
-    if (h.includes('tuyaeu') || h.includes('smart321') || h.includes('eu')) return 'https://apigw.tuyaeu.com';
-    if (h.includes('tuyaus') || h.includes('us'))  return 'https://apigw.tuyaus.com';
-    if (h.includes('tuyain') || h.includes('in'))  return 'https://apigw.tuyain.com';
-    if (h.includes('iotbing') || h.includes('cn')) return 'https://apigw.iotbing.com';
-    return AUTH_GATEWAYS[0]; // EU as default
-  }
-
   async generateQRCode(userCode: string): Promise<{ qrcode: string; token: string }> {
-    // Build gateway list: stored-derived first, then all fallbacks
-    const primary = this.getAuthGateway();
-    const gateways = [primary, ...AUTH_GATEWAYS.filter((g) => g !== primary)];
-
+    // Always iterate AUTH_GATEWAYS in order (iotbing.com first — HA clientId is registered there).
+    // Never derive the gateway from the stored API endpoint, which is the signed-API host, not auth.
     let lastErr = '';
-    for (const gw of gateways) {
+    for (const gw of AUTH_GATEWAYS) {
       const url = new URL(`${gw}/v1.0/m/life/home-assistant/qrcode/tokens`);
       url.searchParams.set('clientid', this.clientId);
       url.searchParams.set('usercode', userCode);
@@ -132,8 +118,7 @@ export class TuyaApiClient {
         if (res.success) return res.result as { qrcode: string; token: string };
         lastErr = `${gw}: ${res.code} ${res.msg ?? ''}`;
         // Tuya returns code as string OR number — normalise before comparing.
-        // -9999999 / 1106 / 1108 = "wrong gateway or app param" → try next.
-        // Any other error means a real problem → throw immediately.
+        // -9999999 / 1106 / 1108 = "wrong gateway" → try next gateway.
         const code = Number(res.code);
         if (code !== -9999999 && code !== 1106 && code !== 1108) {
           throw new Error(`Tuya API error (${res.code ?? '?'}): ${res.msg ?? JSON.stringify(res)}`);
@@ -147,7 +132,8 @@ export class TuyaApiClient {
   }
 
   async pollLoginResult(token: string, userCode: string): Promise<TokenInfo> {
-    const gw = this.getAuthGateway();
+    // Poll on the same gateway order as generation — iotbing.com first.
+    const gw = AUTH_GATEWAYS[0];
     const maxAttempts = 30;
     for (let i = 0; i < maxAttempts; i++) {
       const url = new URL(`${gw}/v1.0/m/life/home-assistant/qrcode/tokens/${token}`);
