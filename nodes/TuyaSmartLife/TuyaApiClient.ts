@@ -37,6 +37,21 @@ export interface FunctionSpec {
   values: string; // JSON string describing allowed values / range
 }
 
+export interface EndpointCandidate {
+  method: string;
+  path: string;
+  params?: Record<string, string>;
+  body?: Record<string, unknown>;
+}
+
+export interface EndpointResult {
+  endpoint: string;
+  method: string;
+  success: boolean;
+  result?: any;
+  error?: string;
+}
+
 export class TuyaApiClient {
   private tokenInfo: TokenInfo | null;
   private endpoint: string;
@@ -136,7 +151,192 @@ export class TuyaApiClient {
     return this.tokenInfo;
   }
 
+  // --- Vacuum / Sweeper endpoints (undocumented consumer API — probe all variants) ---
+
+  async probeEndpoints(candidates: EndpointCandidate[]): Promise<EndpointResult[]> {
+    const results: EndpointResult[] = [];
+    for (const c of candidates) {
+      try {
+        const raw = await this.rawRequest(c.method, c.path, c.params, c.body);
+        results.push({ endpoint: c.path, method: c.method, success: raw.success, result: raw.result ?? raw, error: raw.success ? undefined : (raw.msg ?? raw.message) });
+      } catch (e: any) {
+        results.push({ endpoint: c.path, method: c.method, success: false, error: e.message });
+      }
+    }
+    return results;
+  }
+
+  async getVacuumCurrentMap(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/map/current` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/map/current` },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/map/current` },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/map/current` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/map/current` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/map/current` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/map/current` },
+      { method: 'GET', path: `/v1.0/m/life/sd/devices/${deviceId}/map/current` },
+    ]);
+  }
+
+  async getVacuumMapFileList(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/map/file/list` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/map/file/list` },
+    ]);
+  }
+
+  async getVacuumCleaningRecords(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/sweep/records` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/sweep/records` },
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/sweep/records` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/sweep/records` },
+      { method: 'GET', path: `/v2.0/m/life/laser/sweep/devices/${deviceId}/histories` },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/histories` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/records` },
+      { method: 'GET', path: `/v1.0/m/life/sd/devices/${deviceId}/records` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/report` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/events` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/log` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/history` },
+    ]);
+  }
+
+  async getVacuumAreas(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/areas` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/areas` },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/areas` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/areas` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/areas` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/areas` },
+    ]);
+  }
+
+  async getVacuumRooms(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/rooms` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/rooms` },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/rooms` },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/rooms` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/rooms` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/rooms` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/rooms` },
+    ]);
+  }
+
+  async getVacuumConfigurations(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/configurations` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/configurations` },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/configurations` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/configurations` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/configurations` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/configurations` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/configurations` },
+    ]);
+  }
+
+  async getVacuumDps(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/dps` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/dps` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/dps` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/dps` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/dps` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/dps` },
+    ]);
+  }
+
+  async getVacuumSchedules(deviceId: string): Promise<EndpointResult[]> {
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/schedules` },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/timers` },
+    ]);
+  }
+
+  async probeAllVacuumEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const [map, mapFiles, records, areas, rooms, configs, dps, schedules] = await Promise.all([
+      this.getVacuumCurrentMap(deviceId),
+      this.getVacuumMapFileList(deviceId),
+      this.getVacuumCleaningRecords(deviceId),
+      this.getVacuumAreas(deviceId),
+      this.getVacuumRooms(deviceId),
+      this.getVacuumConfigurations(deviceId),
+      this.getVacuumDps(deviceId),
+      this.getVacuumSchedules(deviceId),
+    ]);
+    return [...map, ...mapFiles, ...records, ...areas, ...rooms, ...configs, ...dps, ...schedules];
+  }
+
   // --- Core request method ---
+
+  // Same as request() but never throws on API-level errors (success:false) — used for endpoint probing
+  private async rawRequest(
+    method: string,
+    path: string,
+    params?: Record<string, string>,
+    body?: Record<string, unknown>,
+  ): Promise<any> {
+    await this.refreshTokenIfNeeded();
+
+    const rid = crypto.randomUUID();
+    const sid = '';
+    const refreshToken = this.tokenInfo?.refreshToken ?? '';
+
+    const md5 = crypto.createHash('md5');
+    md5.update(rid + refreshToken, 'utf8');
+    const hashKey = md5.digest('hex');
+
+    const secret = generateSecret(rid, sid, hashKey);
+
+    let queryEncdata = '';
+    if (params && Object.keys(params).length > 0) {
+      queryEncdata = aesGcmEncrypt(JSON.stringify(params), secret);
+    }
+    const actualQueryParams: Record<string, string> = queryEncdata ? { encdata: queryEncdata } : {};
+
+    let bodyEncdata = '';
+    if (body && Object.keys(body).length > 0) {
+      bodyEncdata = aesGcmEncrypt(JSON.stringify(body), secret);
+    }
+    const actualBody: Record<string, string> = bodyEncdata ? { encdata: bodyEncdata } : {};
+
+    const t = Date.now().toString();
+    const headers: Record<string, string> = {
+      'X-appKey': this.clientId,
+      'X-requestId': rid,
+      'X-sid': sid,
+      'X-time': t,
+    };
+    if (this.tokenInfo?.accessToken) {
+      headers['X-token'] = this.tokenInfo.accessToken;
+    }
+    headers['X-sign'] = buildSignature(hashKey, queryEncdata, bodyEncdata, headers);
+
+    const raw = await httpRequest(method, this.endpoint + path, headers, actualQueryParams, actualBody);
+
+    if (raw.success && typeof raw.result === 'string' && raw.result.length > 0) {
+      try {
+        raw.result = JSON.parse(aesGcmDecrypt(raw.result, secret));
+      } catch {
+        raw.result = aesGcmDecrypt(raw.result, secret);
+      }
+    }
+
+    return raw;
+  }
 
   private async request(
     method: string,

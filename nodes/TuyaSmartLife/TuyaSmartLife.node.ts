@@ -12,7 +12,7 @@ import {
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TuyaApiClient, TokenInfo, Command } from './TuyaApiClient';
+import { TuyaApiClient, TokenInfo, Command, EndpointResult } from './TuyaApiClient';
 
 // File-based token storage — persists across workflows, executions and n8n restarts
 function tokenFilePath(): string {
@@ -112,6 +112,7 @@ export class TuyaSmartLife implements INodeType {
           { name: 'Setup', value: 'setup' },
           { name: 'Devices', value: 'devices' },
           { name: 'Device', value: 'device' },
+          { name: 'Vacuum', value: 'vacuum' },
         ],
         default: 'setup',
       },
@@ -214,6 +215,102 @@ export class TuyaSmartLife implements INodeType {
         description: 'The ID of the device to control',
         displayOptions: { show: { resource: ['device'], operation: ['sendCommand'] } },
       },
+      // ── Vacuum operations ─────────────────────────────────────────────────
+      {
+        displayName: 'Operation',
+        name: 'operation',
+        type: 'options',
+        noDataExpression: true,
+        displayOptions: { show: { resource: ['vacuum'] } },
+        options: [
+          {
+            name: 'Get Current Map',
+            value: 'getCurrentMap',
+            description: 'Try all known API variants to fetch the current map data',
+            action: 'Get current vacuum map',
+          },
+          {
+            name: 'Get Map File List',
+            value: 'getMapFileList',
+            description: 'Try all known API variants to list stored map files',
+            action: 'Get vacuum map file list',
+          },
+          {
+            name: 'Get Cleaning Records',
+            value: 'getCleaningRecords',
+            description: 'Try all known API variants to fetch cleaning history',
+            action: 'Get vacuum cleaning records',
+          },
+          {
+            name: 'Get Areas',
+            value: 'getAreas',
+            description: 'Try all known API variants to fetch saved cleaning areas',
+            action: 'Get vacuum areas',
+          },
+          {
+            name: 'Get Rooms',
+            value: 'getRooms',
+            description: 'Try all known API variants to fetch room list',
+            action: 'Get vacuum rooms',
+          },
+          {
+            name: 'Get Configurations',
+            value: 'getConfigurations',
+            description: 'Try all known API variants to fetch device configuration',
+            action: 'Get vacuum configurations',
+          },
+          {
+            name: 'Get DPS',
+            value: 'getDps',
+            description: 'Try all known API variants to fetch raw data points',
+            action: 'Get vacuum DPS',
+          },
+          {
+            name: 'Get Schedules',
+            value: 'getSchedules',
+            description: 'Try all known API variants to fetch cleaning schedules/timers',
+            action: 'Get vacuum schedules',
+          },
+          {
+            name: 'Probe All Endpoints',
+            value: 'probeAll',
+            description: 'Try every known endpoint category at once — useful to discover which ones this device supports',
+            action: 'Probe all vacuum endpoints',
+          },
+        ],
+        default: 'probeAll',
+      },
+      {
+        displayName: 'Device ID',
+        name: 'deviceId',
+        type: 'string',
+        default: '',
+        required: true,
+        description: 'The ID of the vacuum device',
+        displayOptions: { show: { resource: ['vacuum'] } },
+      },
+      {
+        displayName: 'Output Mode',
+        name: 'outputMode',
+        type: 'options',
+        noDataExpression: true,
+        displayOptions: { show: { resource: ['vacuum'] } },
+        options: [
+          {
+            name: 'Successful Only',
+            value: 'successOnly',
+            description: 'Return only endpoints that responded with success:true',
+          },
+          {
+            name: 'All Results',
+            value: 'all',
+            description: 'Return every endpoint tried, including failed ones — useful for debugging',
+          },
+        ],
+        default: 'successOnly',
+      },
+
+      // ── Device > Send Command fields ──────────────────────────────────────
       {
         displayName: 'Commands',
         name: 'commandsUi',
@@ -456,6 +553,66 @@ export class TuyaSmartLife implements INodeType {
             });
 
             returnData.push({ json: { ...device, status: enrichedStatus } as unknown as IDataObject });
+          }
+
+        } else if (resource === 'vacuum') {
+          const deviceId = this.getNodeParameter('deviceId', i) as string;
+          const outputMode = this.getNodeParameter('outputMode', i) as string;
+
+          let results: EndpointResult[] = [];
+
+          if (operation === 'getCurrentMap') {
+            results = await client.getVacuumCurrentMap(deviceId);
+          } else if (operation === 'getMapFileList') {
+            results = await client.getVacuumMapFileList(deviceId);
+          } else if (operation === 'getCleaningRecords') {
+            results = await client.getVacuumCleaningRecords(deviceId);
+          } else if (operation === 'getAreas') {
+            results = await client.getVacuumAreas(deviceId);
+          } else if (operation === 'getRooms') {
+            results = await client.getVacuumRooms(deviceId);
+          } else if (operation === 'getConfigurations') {
+            results = await client.getVacuumConfigurations(deviceId);
+          } else if (operation === 'getDps') {
+            results = await client.getVacuumDps(deviceId);
+          } else if (operation === 'getSchedules') {
+            results = await client.getVacuumSchedules(deviceId);
+          } else if (operation === 'probeAll') {
+            results = await client.probeAllVacuumEndpoints(deviceId);
+          }
+
+          syncTokens();
+
+          const filtered = outputMode === 'successOnly' ? results.filter((r) => r.success) : results;
+          const successCount = results.filter((r) => r.success).length;
+
+          // Each result becomes a separate item so they can be processed individually in n8n
+          if (filtered.length === 0) {
+            returnData.push({
+              json: {
+                deviceId,
+                operation,
+                successCount,
+                totalTried: results.length,
+                message: outputMode === 'successOnly'
+                  ? 'No endpoints responded successfully. Switch Output Mode to "All Results" to see errors.'
+                  : 'No endpoints tried.',
+              },
+            });
+          } else {
+            for (const r of filtered) {
+              returnData.push({
+                json: {
+                  deviceId,
+                  operation,
+                  endpoint: r.endpoint,
+                  method: r.method,
+                  success: r.success,
+                  result: r.result ?? null,
+                  error: r.error ?? null,
+                } as unknown as IDataObject,
+              });
+            }
           }
 
         } else if (resource === 'device') {
