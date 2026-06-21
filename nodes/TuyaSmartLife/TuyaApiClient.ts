@@ -43,6 +43,8 @@ export interface TokenInfo {
   uid: string;
   terminalId: string;
   endpoint: string; // returned by login response, varies per user/region
+  mqttPassword?: string; // present in some regions — used directly for MQTT auth
+  extras?: Record<string, unknown>; // any other fields from the login response
 }
 
 export interface Device {
@@ -127,13 +129,21 @@ export class TuyaApiClient {
         const r = res.result as any;
         // API returns snake_case on initial login; camelCase on refresh — handle both
         const endpoint = normalizeEndpoint(r.endpoint);
+        const known = new Set(['access_token','accessToken','refresh_token','refreshToken',
+          'expire_time','expireTime','uid','terminalId','terminal_id','endpoint']);
+        const extras: Record<string, unknown> = {};
+        for (const k of Object.keys(r)) {
+          if (!known.has(k)) extras[k] = r[k];
+        }
         return {
-          accessToken: r.access_token ?? r.accessToken ?? '',
-          refreshToken: r.refresh_token ?? r.refreshToken ?? '',
-          expireTime: (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
-          uid: r.uid ?? '',
-          terminalId: r.terminalId ?? r.terminal_id ?? '',
+          accessToken:  r.access_token   ?? r.accessToken   ?? '',
+          refreshToken: r.refresh_token  ?? r.refreshToken  ?? '',
+          expireTime:   (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
+          uid:          r.uid ?? '',
+          terminalId:   r.terminalId ?? r.terminal_id ?? '',
           endpoint,
+          mqttPassword: r.mqttPassword ?? r.mqtt_password ?? r.pushToken ?? r.push_token ?? undefined,
+          extras: Object.keys(extras).length ? extras : undefined,
         };
       }
       await sleep(2000);
@@ -348,6 +358,11 @@ export class TuyaApiClient {
       { clientId: uid,                 username: uid, password: accessToken,                      protocolVersion: 4, label: 'v311/uid/token' },
       { clientId: terminalId,          username: uid, password: accessToken,                      protocolVersion: 5, label: 'v5/terminalId/token' },
     ];
+
+    // If the login response included a dedicated MQTT password, try it first
+    if (token.mqttPassword) {
+      strategies.unshift({ clientId: terminalId, username: uid, password: token.mqttPassword, protocolVersion: 4, label: 'v311/terminalId/loginMqttPw' });
+    }
 
     // Subscribe to all sub-topics under uid to catch any format the device uses
     const sourceTopic = `tylink/${uid}/#`;

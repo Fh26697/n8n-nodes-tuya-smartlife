@@ -634,6 +634,8 @@ export class TuyaSmartLife implements INodeType {
                 expiresAt: loginResult.expireTime
                   ? new Date(loginResult.expireTime).toISOString()
                   : 'unknown',
+                mqttPasswordFromLogin: loginResult.mqttPassword ?? null,
+                extraLoginFields: loginResult.extras ?? null,
                 message: 'Login successful — tokens saved automatically, no manual steps needed.',
               },
             });
@@ -751,6 +753,8 @@ export class TuyaSmartLife implements INodeType {
                 commandTrans: result.commandTrans,
                 pathData: result.pathData,
                 allMessages: result.allMessages,
+                strategiesTried: result.strategiesTried ?? [],
+                authError: result.authError ?? null,
               } as unknown as IDataObject,
             });
             continue;
