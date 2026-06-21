@@ -1,7 +1,26 @@
 import * as crypto from 'crypto';
 import * as https from 'https';
 import { URL } from 'url';
+import mqtt from 'mqtt';
 import { SCHEMA, ENDPOINT, NONCE_CHARS } from './constants';
+
+export interface MqttConfig {
+  url: string;
+  port: number;
+  clientId: string;
+  username: string;
+  password: string;
+  sourceTopic: string;
+  sinkTopic?: string;
+}
+
+export interface MqttMapResult {
+  commandTrans: string | null;
+  pathData: string | null;
+  allMessages: any[];
+  timedOut: boolean;
+  elapsedMs: number;
+}
 
 export interface TokenInfo {
   accessToken: string;
@@ -145,6 +164,87 @@ export class TuyaApiClient {
 
   async sendCommand(deviceId: string, commands: Command[]): Promise<void> {
     await this.request('POST', `/v1.1/m/thing/${deviceId}/commands`, undefined, { commands });
+  }
+
+  async getMqttConfig(uid: string): Promise<MqttConfig> {
+    const res = await this.request('GET', `/v1.0/m/life/users/${uid}/mqtt`);
+    const r = res.result as any;
+    return {
+      url:         r.url         ?? r.mqttUrl    ?? r.host      ?? r.broker,
+      port:        r.port        ?? 8883,
+      clientId:    r.clientId    ?? r.client_id  ?? r.clientid,
+      username:    r.username    ?? r.user        ?? r.userName,
+      password:    r.password    ?? r.pwd         ?? r.pass,
+      sourceTopic: r.sourceTopic ?? r.source_topic ?? r.subscribeTopic ?? r.subTopic ?? r.topic,
+      sinkTopic:   r.sinkTopic  ?? r.sink_topic  ?? r.publishTopic,
+    };
+  }
+
+  async requestVacuumMapViaMqtt(deviceId: string, uid: string, timeoutMs = 15_000): Promise<MqttMapResult> {
+    const mqttConfig = await this.getMqttConfig(uid);
+    const start = Date.now();
+
+    return new Promise((resolve, reject) => {
+      const brokerUrl = `mqtts://${mqttConfig.url}:${mqttConfig.port}`;
+      const client = mqtt.connect(brokerUrl, {
+        clientId:         mqttConfig.clientId,
+        username:         mqttConfig.username,
+        password:         mqttConfig.password,
+        rejectUnauthorized: false,
+        connectTimeout:   10_000,
+      });
+
+      const allMessages: any[] = [];
+      let commandTrans: string | null = null;
+      let pathData: string | null = null;
+      let done = false;
+
+      const finish = (timedOut: boolean) => {
+        if (done) return;
+        done = true;
+        client.end(true);
+        resolve({ commandTrans, pathData, allMessages, timedOut, elapsedMs: Date.now() - start });
+      };
+
+      const timer = setTimeout(() => finish(true), timeoutMs);
+
+      client.on('connect', () => {
+        client.subscribe(mqttConfig.sourceTopic, async (err) => {
+          if (err) { clearTimeout(timer); finish(true); return; }
+          try {
+            await this.sendCommand(deviceId, [{ code: 'request', value: 'get_both' }]);
+          } catch (e) {
+            clearTimeout(timer);
+            client.end(true);
+            reject(e);
+          }
+        });
+      });
+
+      client.on('message', (_topic: string, raw: Buffer) => {
+        let msg: any;
+        try { msg = JSON.parse(raw.toString()); } catch { msg = { raw: raw.toString('base64') }; }
+        allMessages.push(msg);
+
+        // DPs come as numeric keys (dpId) or string status codes — handle both
+        const dps: Record<string, any> = msg?.data?.dps ?? msg?.data?.status ?? msg?.dps ?? msg?.status ?? {};
+        if (dps['14']           !== undefined) pathData     = String(dps['14']);
+        if (dps['15']           !== undefined) commandTrans = String(dps['15']);
+        if (dps['path_data']    !== undefined) pathData     = String(dps['path_data']);
+        if (dps['command_trans'] !== undefined) commandTrans = String(dps['command_trans']);
+
+        // Both pieces received → done early
+        if (commandTrans !== null && pathData !== null) {
+          clearTimeout(timer);
+          finish(false);
+        }
+      });
+
+      client.on('error', (err: Error) => {
+        clearTimeout(timer);
+        if (!done) { done = true; client.end(true); reject(new Error(`MQTT: ${err.message}`)); }
+      });
+    });
   }
 
   async logout(accessToken: string, terminalId: string): Promise<void> {

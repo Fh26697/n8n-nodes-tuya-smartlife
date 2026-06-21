@@ -12,7 +12,7 @@ import {
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TuyaApiClient, TokenInfo, Command, EndpointResult } from './TuyaApiClient';
+import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult } from './TuyaApiClient';
 
 // File-based token storage — persists across workflows, executions and n8n restarts
 function tokenFilePath(): string {
@@ -278,6 +278,12 @@ export class TuyaSmartLife implements INodeType {
             description: 'Try every known endpoint category at once — useful to discover which ones this device supports',
             action: 'Probe all vacuum endpoints',
           },
+          {
+            name: 'Get Map (MQTT)',
+            value: 'getMapMqtt',
+            description: 'Send get_both request, connect via MQTT and wait for map + path data. Takes up to the configured timeout.',
+            action: 'Get vacuum map via MQTT',
+          },
         ],
         default: 'probeAll',
       },
@@ -291,11 +297,19 @@ export class TuyaSmartLife implements INodeType {
         displayOptions: { show: { resource: ['vacuum'] } },
       },
       {
+        displayName: 'MQTT Timeout (seconds)',
+        name: 'mqttTimeout',
+        type: 'number',
+        default: 15,
+        description: 'How long to wait for the vacuum to respond with map data (5–60 seconds)',
+        displayOptions: { show: { resource: ['vacuum'], operation: ['getMapMqtt'] } },
+      },
+      {
         displayName: 'Output Mode',
         name: 'outputMode',
         type: 'options',
         noDataExpression: true,
-        displayOptions: { show: { resource: ['vacuum'] } },
+        displayOptions: { show: { resource: ['vacuum'], operation: ['getCurrentMap', 'getMapFileList', 'getCleaningRecords', 'getAreas', 'getRooms', 'getConfigurations', 'getDps', 'getSchedules', 'probeAll'] } },
         options: [
           {
             name: 'Successful Only',
@@ -684,6 +698,30 @@ export class TuyaSmartLife implements INodeType {
 
         } else if (resource === 'vacuum') {
           const deviceId = this.getNodeParameter('deviceId', i) as string;
+
+          if (operation === 'getMapMqtt') {
+            const timeoutSec = this.getNodeParameter('mqttTimeout', i, 15) as number;
+            const uid = client.getTokenInfo()?.uid ?? stored?.uid ?? '';
+            if (!uid) throw new NodeOperationError(this.getNode(), 'No UID found — run Setup > Complete Login first.');
+
+            const result: MqttMapResult = await client.requestVacuumMapViaMqtt(deviceId, uid, timeoutSec * 1000);
+            syncTokens();
+
+            returnData.push({
+              json: {
+                deviceId,
+                uid,
+                timedOut: result.timedOut,
+                elapsedMs: result.elapsedMs,
+                receivedMessages: result.allMessages.length,
+                commandTrans: result.commandTrans,
+                pathData: result.pathData,
+                allMessages: result.allMessages,
+              } as unknown as IDataObject,
+            });
+            continue;
+          }
+
           const outputMode = this.getNodeParameter('outputMode', i) as string;
 
           let results: EndpointResult[] = [];
