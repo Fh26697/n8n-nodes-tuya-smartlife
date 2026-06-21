@@ -153,6 +153,12 @@ export class TuyaSmartLife implements INodeType {
             description: 'Check whether tokens are stored and when they expire',
             action: 'Show login status',
           },
+          {
+            name: 'Import Token Manually',
+            value: 'importToken',
+            description: 'Paste an existing access token directly — use this if QR login fails',
+            action: 'Import token manually',
+          },
         ],
         default: 'generateQRCode',
       },
@@ -164,6 +170,51 @@ export class TuyaSmartLife implements INodeType {
         required: true,
         description: 'The token returned by the Generate QR Code operation',
         displayOptions: { show: { resource: ['setup'], operation: ['completeLogin'] } },
+      },
+      {
+        displayName: 'Access Token',
+        name: 'importAccessToken',
+        type: 'string',
+        typeOptions: { password: true },
+        default: '',
+        required: true,
+        description: 'Access token from another Tuya tool (e.g. tinytuya wizard, HA Tuya integration)',
+        displayOptions: { show: { resource: ['setup'], operation: ['importToken'] } },
+      },
+      {
+        displayName: 'Refresh Token',
+        name: 'importRefreshToken',
+        type: 'string',
+        typeOptions: { password: true },
+        default: '',
+        description: 'Refresh token (optional but recommended)',
+        displayOptions: { show: { resource: ['setup'], operation: ['importToken'] } },
+      },
+      {
+        displayName: 'UID',
+        name: 'importUid',
+        type: 'string',
+        default: '',
+        required: true,
+        description: 'User ID (e.g. eu1575716270639BOZ50)',
+        displayOptions: { show: { resource: ['setup'], operation: ['importToken'] } },
+      },
+      {
+        displayName: 'API Endpoint',
+        name: 'importEndpoint',
+        type: 'string',
+        default: '',
+        placeholder: 'https://apigw.tuyaeu.com',
+        description: 'Regional API endpoint. Use apigw.tuyaeu.com for EU, apigw.tuyaus.com for US, apigw.iotbing.com for China.',
+        displayOptions: { show: { resource: ['setup'], operation: ['importToken'] } },
+      },
+      {
+        displayName: 'Terminal ID',
+        name: 'importTerminalId',
+        type: 'string',
+        default: '',
+        description: 'Terminal/session ID (optional)',
+        displayOptions: { show: { resource: ['setup'], operation: ['importToken'] } },
       },
 
       // ── Devices operations ────────────────────────────────────────────────
@@ -662,6 +713,35 @@ export class TuyaSmartLife implements INodeType {
                 tokenFile: tokenFilePath(),
                 expiresAt: token?.expireTime ? new Date(token.expireTime).toISOString() : null,
                 isExpired: token?.expireTime ? token.expireTime < Date.now() : null,
+              },
+            });
+
+          } else if (operation === 'importToken') {
+            const accessToken   = (this.getNodeParameter('importAccessToken', i) as string).trim();
+            const refreshToken  = (this.getNodeParameter('importRefreshToken', i, '') as string).trim();
+            const uid           = (this.getNodeParameter('importUid', i) as string).trim();
+            const endpoint      = (this.getNodeParameter('importEndpoint', i, '') as string).trim();
+            const terminalId    = (this.getNodeParameter('importTerminalId', i, '') as string).trim();
+
+            if (!accessToken) throw new NodeOperationError(this.getNode(), 'Access Token is required for manual import.');
+            if (!uid)         throw new NodeOperationError(this.getNode(), 'UID is required for manual import.');
+
+            const imported: TokenInfo = {
+              accessToken,
+              refreshToken: refreshToken || '',
+              uid,
+              terminalId: terminalId || '',
+              endpoint: endpoint || 'https://apigw.tuyaeu.com',
+              expireTime: Date.now() + 7200_000, // assume 2 h; user can re-import if it expires
+            };
+            writeToken(clientId, userCode, imported);
+            returnData.push({
+              json: {
+                success: true,
+                uid,
+                endpoint: imported.endpoint,
+                tokenFile: tokenFilePath(),
+                message: 'Token imported and saved. Run "Show Login Status" to verify.',
               },
             });
           }

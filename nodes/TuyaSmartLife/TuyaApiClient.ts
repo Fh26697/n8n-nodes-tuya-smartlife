@@ -131,8 +131,11 @@ export class TuyaApiClient {
         const res = await plainRequest('POST', url.toString());
         if (res.success) return res.result as { qrcode: string; token: string };
         lastErr = `${gw}: ${res.code} ${res.msg ?? ''}`;
-        // Hard API errors (not just "wrong gateway") — stop trying
-        if (res.code !== -9999999 && res.code !== 1106 && res.code !== 1108) {
+        // Tuya returns code as string OR number — normalise before comparing.
+        // -9999999 / 1106 / 1108 = "wrong gateway or app param" → try next.
+        // Any other error means a real problem → throw immediately.
+        const code = Number(res.code);
+        if (code !== -9999999 && code !== 1106 && code !== 1108) {
           throw new Error(`Tuya API error (${res.code ?? '?'}): ${res.msg ?? JSON.stringify(res)}`);
         }
       } catch (e: any) {
