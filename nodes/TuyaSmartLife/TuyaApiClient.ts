@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as https from 'https';
 import { URL } from 'url';
 import mqtt from 'mqtt';
-import { SCHEMA, ENDPOINT, NONCE_CHARS } from './constants';
+import { SCHEMA, ENDPOINT, NONCE_CHARS, AUTH_GATEWAYS } from './constants';
 
 export interface MqttConfig {
   url: string;
@@ -104,30 +104,55 @@ export class TuyaApiClient {
 
   // --- Public API methods ---
 
+  // Return the correct apigw.* auth gateway for QR login.
+  // The stored API endpoint (m.smart321.com, a.tuyaeu.com, …) is the SIGNED-API host;
+  // QR code generation must go to apigw.* instead.
+  private getAuthGateway(): string {
+    const h = this.endpoint.replace(/^https?:\/\//, '').toLowerCase();
+    if (h.includes('tuyaeu') || h.includes('smart321') || h.includes('eu')) return 'https://apigw.tuyaeu.com';
+    if (h.includes('tuyaus') || h.includes('us'))  return 'https://apigw.tuyaus.com';
+    if (h.includes('tuyain') || h.includes('in'))  return 'https://apigw.tuyain.com';
+    if (h.includes('iotbing') || h.includes('cn')) return 'https://apigw.iotbing.com';
+    return AUTH_GATEWAYS[0]; // EU as default
+  }
+
   async generateQRCode(userCode: string): Promise<{ qrcode: string; token: string }> {
-    // LoginControl flow: plain HTTP, no signing or encryption (per tuya-device-sharing-sdk/user.py)
-    const url = new URL(`${this.endpoint}/v1.0/m/life/home-assistant/qrcode/tokens`);
-    url.searchParams.set('clientid', this.clientId);
-    url.searchParams.set('usercode', userCode);
-    url.searchParams.set('schema', SCHEMA);
-    const res = await plainRequest('POST', url.toString());
-    if (!res.success) {
-      throw new Error(`Tuya API error (${res.code ?? '?'}): ${res.msg ?? JSON.stringify(res)}`);
+    // Build gateway list: stored-derived first, then all fallbacks
+    const primary = this.getAuthGateway();
+    const gateways = [primary, ...AUTH_GATEWAYS.filter((g) => g !== primary)];
+
+    let lastErr = '';
+    for (const gw of gateways) {
+      const url = new URL(`${gw}/v1.0/m/life/home-assistant/qrcode/tokens`);
+      url.searchParams.set('clientid', this.clientId);
+      url.searchParams.set('usercode', userCode);
+      url.searchParams.set('schema', SCHEMA);
+      try {
+        const res = await plainRequest('POST', url.toString());
+        if (res.success) return res.result as { qrcode: string; token: string };
+        lastErr = `${gw}: ${res.code} ${res.msg ?? ''}`;
+        // Hard API errors (not just "wrong gateway") — stop trying
+        if (res.code !== -9999999 && res.code !== 1106 && res.code !== 1108) {
+          throw new Error(`Tuya API error (${res.code ?? '?'}): ${res.msg ?? JSON.stringify(res)}`);
+        }
+      } catch (e: any) {
+        if (e.message.startsWith('Tuya API error')) throw e;
+        lastErr = `${gw}: ${e.message}`;
+      }
     }
-    return res.result as { qrcode: string; token: string };
+    throw new Error(`QR code generation failed on all regional gateways. Last: ${lastErr}`);
   }
 
   async pollLoginResult(token: string, userCode: string): Promise<TokenInfo> {
-    // LoginControl flow: plain HTTP, no signing or encryption (per tuya-device-sharing-sdk/user.py)
+    const gw = this.getAuthGateway();
     const maxAttempts = 30;
     for (let i = 0; i < maxAttempts; i++) {
-      const url = new URL(`${this.endpoint}/v1.0/m/life/home-assistant/qrcode/tokens/${token}`);
+      const url = new URL(`${gw}/v1.0/m/life/home-assistant/qrcode/tokens/${token}`);
       url.searchParams.set('clientid', this.clientId);
       url.searchParams.set('usercode', userCode);
       const res = await plainRequest('GET', url.toString());
       if (res.success && res.result) {
         const r = res.result as any;
-        // API returns snake_case on initial login; camelCase on refresh — handle both
         const endpoint = normalizeEndpoint(r.endpoint);
         const known = new Set(['access_token','accessToken','refresh_token','refreshToken',
           'expire_time','expireTime','uid','terminalId','terminal_id','endpoint']);
@@ -136,8 +161,8 @@ export class TuyaApiClient {
           if (!known.has(k)) extras[k] = r[k];
         }
         return {
-          accessToken:  r.access_token   ?? r.accessToken   ?? '',
-          refreshToken: r.refresh_token  ?? r.refreshToken  ?? '',
+          accessToken:  r.access_token  ?? r.accessToken  ?? '',
+          refreshToken: r.refresh_token ?? r.refreshToken ?? '',
           expireTime:   (res.t as number) + (r.expire_time ?? r.expireTime ?? 7200) * 1000,
           uid:          r.uid ?? '',
           terminalId:   r.terminalId ?? r.terminal_id ?? '',
