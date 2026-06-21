@@ -711,6 +711,8 @@ export class TuyaSmartLife implements INodeType {
               json: {
                 deviceId,
                 uid,
+                mqttConfigSource: result.mqttConfigSource ?? null,
+                brokerUrl: result.brokerUrl ?? null,
                 timedOut: result.timedOut,
                 elapsedMs: result.elapsedMs,
                 receivedMessages: result.allMessages.length,

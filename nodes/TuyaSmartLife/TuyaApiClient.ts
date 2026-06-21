@@ -20,6 +20,8 @@ export interface MqttMapResult {
   allMessages: any[];
   timedOut: boolean;
   elapsedMs: number;
+  mqttConfigSource?: string;
+  brokerUrl?: string;
 }
 
 export interface TokenInfo {
@@ -166,17 +168,79 @@ export class TuyaApiClient {
     await this.request('POST', `/v1.1/m/thing/${deviceId}/commands`, undefined, { commands });
   }
 
-  async getMqttConfig(uid: string): Promise<MqttConfig> {
-    const res = await this.request('GET', `/v1.0/m/life/users/${uid}/mqtt`);
-    const r = res.result as any;
+  async getMqttConfig(uid: string): Promise<MqttConfig & { source: string }> {
+    // Try all known API path variants first
+    const candidates = [
+      `/v1.0/m/life/users/${uid}/mqtt`,
+      `/v2.0/m/life/users/${uid}/mqtt`,
+      `/v1.0/m/life/users/mqtt`,
+      `/v2.0/m/life/users/mqtt`,
+      `/v1.0/m/life/ha/mqtt`,
+      `/v1.0/m/life/mqtt`,
+      `/v1.0/m/mqtt`,
+      `/v1.0/m/life/users/${uid}/push-config`,
+      `/v1.0/m/life/users/${uid}/push`,
+    ];
+
+    for (const path of candidates) {
+      try {
+        const raw = await this.rawRequest('GET', path);
+        if (raw.success && raw.result && typeof raw.result === 'object') {
+          const r = raw.result as any;
+          const url = r.url ?? r.mqttUrl ?? r.host ?? r.broker;
+          const topic = r.sourceTopic ?? r.source_topic ?? r.subscribeTopic ?? r.subTopic ?? r.topic;
+          if (url && topic) {
+            return {
+              source:      `api:${path}`,
+              url,
+              port:        r.port        ?? 8883,
+              clientId:    r.clientId    ?? r.client_id  ?? r.clientid,
+              username:    r.username    ?? r.user        ?? r.userName,
+              password:    r.password    ?? r.pwd         ?? r.pass,
+              sourceTopic: topic,
+              sinkTopic:   r.sinkTopic  ?? r.sink_topic  ?? r.publishTopic,
+            };
+          }
+        }
+      } catch { /* try next */ }
+    }
+
+    // Fallback: derive credentials from token info (known Tuya consumer MQTT pattern)
+    return this.deriveMqttConfig(uid);
+  }
+
+  private deriveMqttConfig(uid: string): MqttConfig & { source: string } {
+    // Tuya consumer MQTT broker is regional — derive from the stored REST endpoint
+    const endpointHost = this.endpoint
+      .replace(/^https?:\/\//, '')
+      .replace(/\/.*$/, '');
+
+    // Known regional broker mapping:
+    // REST: a.tuyaeu.com / m.smart321.com → MQTT: m1.tuyaeu.com
+    // REST: a.tuyaus.com                  → MQTT: m1.tuyaus.com
+    // REST: a.tuyacn.com                  → MQTT: m1.tuyacn.com
+    let mqttHost = 'm1.tuyaeu.com'; // EU default
+    if (endpointHost.includes('tuyaus')) mqttHost = 'm1.tuyaus.com';
+    else if (endpointHost.includes('tuyacn')) mqttHost = 'm1.tuyacn.com';
+    else if (endpointHost.includes('tuyain')) mqttHost = 'm1.tuyain.com';
+
+    const accessToken = this.tokenInfo?.accessToken ?? '';
+    const terminalId  = this.tokenInfo?.terminalId  ?? '';
+
+    // Tuya Smart Life consumer MQTT auth (reverse-engineered from the app):
+    // clientId = terminalId (session identifier from login)
+    // username = uid
+    // password = accessToken
+    const clientId = terminalId || `tuyalink_${uid}`;
     return {
-      url:         r.url         ?? r.mqttUrl    ?? r.host      ?? r.broker,
-      port:        r.port        ?? 8883,
-      clientId:    r.clientId    ?? r.client_id  ?? r.clientid,
-      username:    r.username    ?? r.user        ?? r.userName,
-      password:    r.password    ?? r.pwd         ?? r.pass,
-      sourceTopic: r.sourceTopic ?? r.source_topic ?? r.subscribeTopic ?? r.subTopic ?? r.topic,
-      sinkTopic:   r.sinkTopic  ?? r.sink_topic  ?? r.publishTopic,
+      source:      'derived',
+      url:         mqttHost,
+      port:        8883,
+      clientId,
+      username:    uid,
+      password:    accessToken,
+      sourceTopic: `tylink/${uid}/thing/property/report`,
+      sinkTopic:   `tylink/${uid}/thing/property/set`,
     };
   }
 
@@ -203,7 +267,7 @@ export class TuyaApiClient {
         if (done) return;
         done = true;
         client.end(true);
-        resolve({ commandTrans, pathData, allMessages, timedOut, elapsedMs: Date.now() - start });
+        resolve({ commandTrans, pathData, allMessages, timedOut, elapsedMs: Date.now() - start, mqttConfigSource: mqttConfig.source, brokerUrl });
       };
 
       const timer = setTimeout(() => finish(true), timeoutMs);
