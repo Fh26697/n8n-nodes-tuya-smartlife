@@ -39,19 +39,28 @@ function saveTokens(all: Record<string, TokenInfo>): void {
   }
 }
 
-function readToken(userCode: string): TokenInfo | undefined {
-  return loadTokens()[userCode];
+// Token key is "clientId:userCode" so each distinct credential set has its own session.
+// Falls back to legacy "userCode"-only key for backward compatibility with older token files.
+function tokenKey(clientId: string, userCode: string): string {
+  return `${clientId}:${userCode}`;
 }
 
-function writeToken(userCode: string, info: TokenInfo): void {
+function readToken(clientId: string, userCode: string): TokenInfo | undefined {
   const all = loadTokens();
-  all[userCode] = info;
+  return all[tokenKey(clientId, userCode)] ?? all[userCode]; // legacy fallback
+}
+
+function writeToken(clientId: string, userCode: string, info: TokenInfo): void {
+  const all = loadTokens();
+  all[tokenKey(clientId, userCode)] = info;
+  delete all[userCode]; // migrate away from legacy key
   saveTokens(all);
 }
 
-function deleteToken(userCode: string): void {
+function deleteToken(clientId: string, userCode: string): void {
   const all = loadTokens();
-  delete all[userCode];
+  delete all[tokenKey(clientId, userCode)];
+  delete all[userCode]; // clean up legacy key too
   saveTokens(all);
 }
 
@@ -524,7 +533,7 @@ export class TuyaSmartLife implements INodeType {
 
         if (!deviceId) throw new Error('Enter a Device ID first, then refresh this list.');
 
-        const stored = readToken(userCode);
+        const stored = readToken(clientId, userCode);
         if (!stored?.accessToken) throw new Error('Not logged in — run Setup > Complete Login first.');
 
         const client = new TuyaApiClient(clientId, stored);
@@ -573,8 +582,8 @@ export class TuyaSmartLife implements INodeType {
     }
 
     // Load tokens from file — persists across workflows, executions and n8n restarts.
-    // The file is keyed by userCode so multiple accounts don't collide.
-    const stored = readToken(userCode);
+    // Keyed by clientId:userCode so each distinct credential set has its own session.
+    const stored = readToken(clientId, userCode);
     const storedEndpoint = endpointOverride || stored?.endpoint || '';
 
     const tokenInfo: TokenInfo | undefined = stored?.accessToken
@@ -586,7 +595,7 @@ export class TuyaSmartLife implements INodeType {
     // Persist any token refresh back to disk
     const syncTokens = () => {
       const t = client.getTokenInfo();
-      if (t) writeToken(userCode, t);
+      if (t) writeToken(clientId, userCode, t);
     };
 
     for (let i = 0; i < items.length; i++) {
@@ -622,7 +631,7 @@ export class TuyaSmartLife implements INodeType {
             const loginResult = await client.pollLoginResult(qrToken, userCode);
 
             // Persist tokens to file so any workflow can use them
-            writeToken(userCode, loginResult);
+            writeToken(clientId, userCode, loginResult);
 
             returnData.push({
               json: {
@@ -641,7 +650,7 @@ export class TuyaSmartLife implements INodeType {
             });
 
           } else if (operation === 'loginStatus') {
-            const token = readToken(userCode);
+            const token = readToken(clientId, userCode);
             const effectiveEndpoint = endpointOverride || token?.endpoint || null;
             returnData.push({
               json: {
