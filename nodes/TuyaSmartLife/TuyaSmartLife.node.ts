@@ -12,7 +12,7 @@ import {
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult } from './TuyaApiClient';
+import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult, PollMapResult } from './TuyaApiClient';
 
 // File-based token storage — persists across workflows, executions and n8n restarts
 function tokenFilePath(): string {
@@ -279,9 +279,15 @@ export class TuyaSmartLife implements INodeType {
             action: 'Probe all vacuum endpoints',
           },
           {
+            name: 'Get Map (Polling)',
+            value: 'getMapPoll',
+            description: 'Send get_both request, then poll the REST API every few seconds until map data appears. Reliable, no MQTT needed.',
+            action: 'Get vacuum map via polling',
+          },
+          {
             name: 'Get Map (MQTT)',
             value: 'getMapMqtt',
-            description: 'Send get_both request, connect via MQTT and wait for map + path data. Takes up to the configured timeout.',
+            description: 'Send get_both request, connect via MQTT and wait for map + path data. Faster but requires MQTT credentials.',
             action: 'Get vacuum map via MQTT',
           },
         ],
@@ -302,7 +308,7 @@ export class TuyaSmartLife implements INodeType {
         type: 'number',
         default: 15,
         description: 'How long to wait for the vacuum to respond with map data (5–60 seconds)',
-        displayOptions: { show: { resource: ['vacuum'], operation: ['getMapMqtt'] } },
+        displayOptions: { show: { resource: ['vacuum'], operation: ['getMapMqtt', 'getMapPoll'] } },
       },
       {
         displayName: 'Output Mode',
@@ -699,6 +705,31 @@ export class TuyaSmartLife implements INodeType {
         } else if (resource === 'vacuum') {
           const deviceId = this.getNodeParameter('deviceId', i) as string;
 
+          if (operation === 'getMapPoll') {
+            const timeoutSec = this.getNodeParameter('mqttTimeout', i, 30) as number;
+
+            const result: PollMapResult = await client.requestVacuumMapViaPolling(deviceId, timeoutSec * 1000);
+            syncTokens();
+
+            returnData.push({
+              json: {
+                deviceId,
+                method: 'polling',
+                timedOut: result.timedOut,
+                elapsedMs: result.elapsedMs,
+                pollCount: result.pollCount,
+                commandTrans: result.commandTrans,
+                pathData: result.pathData,
+                baseCommandTrans: result.baseCommandTrans,
+                basePathData: result.basePathData,
+                note: result.timedOut
+                  ? 'Timeout reached — device may not have updated its map. Try running a cleaning cycle first.'
+                  : 'Map data received.',
+              } as unknown as IDataObject,
+            });
+            continue;
+          }
+
           if (operation === 'getMapMqtt') {
             const timeoutSec = this.getNodeParameter('mqttTimeout', i, 15) as number;
             const uid = client.getTokenInfo()?.uid ?? stored?.uid ?? '';
@@ -711,6 +742,7 @@ export class TuyaSmartLife implements INodeType {
               json: {
                 deviceId,
                 uid,
+                method: 'mqtt',
                 mqttConfigSource: result.mqttConfigSource ?? null,
                 brokerUrl: result.brokerUrl ?? null,
                 timedOut: result.timedOut,

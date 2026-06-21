@@ -24,6 +24,16 @@ export interface MqttMapResult {
   brokerUrl?: string;
 }
 
+export interface PollMapResult {
+  commandTrans: string | null;
+  pathData: string | null;
+  baseCommandTrans: string;
+  basePathData: string;
+  timedOut: boolean;
+  elapsedMs: number;
+  pollCount: number;
+}
+
 export interface TokenInfo {
   accessToken: string;
   refreshToken: string;
@@ -157,6 +167,72 @@ export class TuyaApiClient {
   async getDeviceStatus(deviceId: string): Promise<Status[]> {
     const res = await this.request('GET', `/v1.0/m/life/devices/${deviceId}/status`);
     return res.result as Status[];
+  }
+
+  // Fetch a single device from one specific home (faster than iterating all homes)
+  private async getDeviceFromHome(deviceId: string, homeId: string): Promise<Device | undefined> {
+    const devRes = await this.request('GET', '/v1.0/m/life/ha/home/devices', { homeId });
+    return ((devRes.result as any[]) ?? [])
+      .map((d: any) => ({ id: d.id, name: d.name, category: d.category, online: d.online, status: d.status ?? [], homeId }))
+      .find((d) => d.id === deviceId);
+  }
+
+  async requestVacuumMapViaPolling(deviceId: string, timeoutMs = 30_000, pollIntervalMs = 3_000): Promise<PollMapResult> {
+    const start = Date.now();
+
+    // Step 1: find the device and its homeId, get baseline values
+    const initial = await this.getDevice(deviceId);
+    if (!initial) throw new Error(`Device ${deviceId} not found`);
+    const homeId = initial.homeId;
+
+    const getVal = (status: Status[], code: string): string =>
+      String(status.find((s) => s.code === code)?.value ?? '');
+
+    const baseCommandTrans = getVal(initial.status, 'command_trans');
+    const basePathData     = getVal(initial.status, 'path_data');
+
+    // Step 2: send request:get_both to trigger the robot to upload its map
+    await this.sendCommand(deviceId, [{ code: 'request', value: 'get_both' }]);
+
+    let pollCount = 0;
+    while (Date.now() - start < timeoutMs) {
+      await sleep(pollIntervalMs);
+      pollCount++;
+
+      const device = await this.getDeviceFromHome(deviceId, homeId);
+      if (!device) continue;
+
+      const commandTrans = getVal(device.status, 'command_trans');
+      const pathData     = getVal(device.status, 'path_data');
+
+      // Detect change: new data should be longer than the baseline config frames
+      const ctChanged  = commandTrans.length > baseCommandTrans.length + 10;
+      const pdChanged  = pathData.length > basePathData.length + 10;
+
+      if (ctChanged || pdChanged) {
+        return {
+          commandTrans:     ctChanged ? commandTrans : null,
+          pathData:         pdChanged ? pathData : null,
+          baseCommandTrans,
+          basePathData,
+          timedOut: false,
+          elapsedMs: Date.now() - start,
+          pollCount,
+        };
+      }
+    }
+
+    // Timeout — return whatever is currently in the status
+    const last = await this.getDeviceFromHome(deviceId, homeId);
+    return {
+      commandTrans:     getVal(last?.status ?? [], 'command_trans') || null,
+      pathData:         getVal(last?.status ?? [], 'path_data') || null,
+      baseCommandTrans,
+      basePathData,
+      timedOut: true,
+      elapsedMs: Date.now() - start,
+      pollCount,
+    };
   }
 
   async getDeviceSpecifications(deviceId: string): Promise<{ functions: FunctionSpec[]; status: FunctionSpec[] }> {
