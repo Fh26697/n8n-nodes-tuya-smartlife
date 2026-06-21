@@ -22,6 +22,8 @@ export interface MqttMapResult {
   elapsedMs: number;
   mqttConfigSource?: string;
   brokerUrl?: string;
+  authError?: string;
+  strategiesTried?: string[];
 }
 
 export interface PollMapResult {
@@ -320,71 +322,124 @@ export class TuyaApiClient {
     };
   }
 
-  async requestVacuumMapViaMqtt(deviceId: string, uid: string, timeoutMs = 15_000): Promise<MqttMapResult> {
-    const mqttConfig = await this.getMqttConfig(uid);
-    const start = Date.now();
+  async requestVacuumMapViaMqtt(deviceId: string, uid: string, timeoutMs = 40_000): Promise<MqttMapResult> {
+    const token = this.tokenInfo!;
+    const accessToken = token.accessToken;
+    const terminalId  = token.terminalId;
 
-    return new Promise((resolve, reject) => {
-      const brokerUrl = `mqtts://${mqttConfig.url}:${mqttConfig.port}`;
-      const client = mqtt.connect(brokerUrl, {
-        clientId:         mqttConfig.clientId,
-        username:         mqttConfig.username,
-        password:         mqttConfig.password,
-        rejectUnauthorized: false,
-        connectTimeout:   10_000,
+    // Regional broker derivation
+    const endpointHost = this.endpoint.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    let mqttHost = 'm1.tuyaeu.com';
+    if (endpointHost.includes('tuyaus'))  mqttHost = 'm1.tuyaus.com';
+    else if (endpointHost.includes('tuyacn')) mqttHost = 'm1.tuyacn.com';
+    else if (endpointHost.includes('tuyain')) mqttHost = 'm1.tuyain.com';
+    const brokerUrl  = `mqtts://${mqttHost}:8883`;
+    const md5hex     = (s: string) => crypto.createHash('md5').update(s).digest('hex');
+
+    // Try multiple auth strategies in priority order.
+    // MQTT 3.1.1 (protocolVersion 4) is used by most Tuya consumer brokers.
+    type Strategy = { clientId: string; username: string; password: string; protocolVersion: 4 | 5; label: string };
+    const strategies: Strategy[] = [
+      { clientId: terminalId,          username: uid, password: accessToken,                      protocolVersion: 4, label: 'v311/terminalId/token' },
+      { clientId: `tuyalink_${uid}`,   username: uid, password: accessToken,                      protocolVersion: 4, label: 'v311/tuyalink_uid/token' },
+      { clientId: terminalId,          username: uid, password: md5hex(`${uid},${accessToken}`),  protocolVersion: 4, label: 'v311/terminalId/md5(uid,token)' },
+      { clientId: terminalId,          username: uid, password: md5hex(accessToken),               protocolVersion: 4, label: 'v311/terminalId/md5(token)' },
+      { clientId: terminalId,          username: uid, password: md5hex(`${uid}|${accessToken}`),  protocolVersion: 4, label: 'v311/terminalId/md5(uid|token)' },
+      { clientId: uid,                 username: uid, password: accessToken,                      protocolVersion: 4, label: 'v311/uid/token' },
+      { clientId: terminalId,          username: uid, password: accessToken,                      protocolVersion: 5, label: 'v5/terminalId/token' },
+    ];
+
+    // Subscribe to all sub-topics under uid to catch any format the device uses
+    const sourceTopic = `tylink/${uid}/#`;
+
+    const start          = Date.now();
+    const strategiesTried: string[] = [];
+
+    for (const strategy of strategies) {
+      const elapsed   = Date.now() - start;
+      const remaining = timeoutMs - elapsed;
+      if (remaining < 3_000) break;
+
+      const connectMs = Math.min(remaining - 2_000, 8_000);
+
+      // Attempt connection — resolve with client on success, null on failure
+      const { client: connectedClient, error: connErr } = await new Promise<{ client: mqtt.MqttClient | null; error: string }>((res) => {
+        const c = mqtt.connect(brokerUrl, {
+          clientId:           strategy.clientId,
+          username:           strategy.username,
+          password:           strategy.password,
+          protocolVersion:    strategy.protocolVersion,
+          rejectUnauthorized: false,
+          connectTimeout:     connectMs,
+        });
+        const t = setTimeout(() => { c.end(true); res({ client: null, error: 'connect timeout' }); }, connectMs + 500);
+        c.once('connect', () => { clearTimeout(t); res({ client: c, error: '' }); });
+        c.once('error',   (e) => { clearTimeout(t); c.end(true); res({ client: null, error: e.message }); });
       });
 
-      const allMessages: any[] = [];
-      let commandTrans: string | null = null;
-      let pathData: string | null = null;
-      let done = false;
+      strategiesTried.push(`${strategy.label}: ${connectedClient ? 'OK' : connErr}`);
 
-      const finish = (timedOut: boolean) => {
-        if (done) return;
-        done = true;
-        client.end(true);
-        resolve({ commandTrans, pathData, allMessages, timedOut, elapsedMs: Date.now() - start, mqttConfigSource: mqttConfig.source, brokerUrl });
-      };
+      if (!connectedClient) continue;
 
-      const timer = setTimeout(() => finish(true), timeoutMs);
+      // Connected — subscribe, send request, wait for map data
+      const msgRemaining = timeoutMs - (Date.now() - start);
 
-      client.on('connect', () => {
-        client.subscribe(mqttConfig.sourceTopic, async (err) => {
+      return new Promise<MqttMapResult>((resolve, reject) => {
+        const allMessages: any[] = [];
+        let commandTrans: string | null = null;
+        let pathData: string | null     = null;
+        let done = false;
+
+        const finish = (timedOut: boolean) => {
+          if (done) return;
+          done = true;
+          connectedClient.end(true);
+          resolve({ commandTrans, pathData, allMessages, timedOut, elapsedMs: Date.now() - start,
+            mqttConfigSource: strategy.label, brokerUrl, strategiesTried });
+        };
+
+        const timer = setTimeout(() => finish(true), msgRemaining);
+
+        connectedClient.subscribe(sourceTopic, (err) => {
           if (err) { clearTimeout(timer); finish(true); return; }
-          try {
-            await this.sendCommand(deviceId, [{ code: 'request', value: 'get_both' }]);
-          } catch (e) {
+          this.sendCommand(deviceId, [{ code: 'request', value: 'get_both' }]).catch((e) => {
             clearTimeout(timer);
-            client.end(true);
+            connectedClient.end(true);
             reject(e);
+          });
+        });
+
+        connectedClient.on('message', (_topic: string, raw: Buffer) => {
+          let msg: any;
+          try { msg = JSON.parse(raw.toString()); } catch { msg = { raw: raw.toString('base64') }; }
+          allMessages.push(msg);
+
+          // DPs arrive as numeric dpId keys or string codes — handle both
+          const dps: Record<string, any> = msg?.data?.dps ?? msg?.data?.status ?? msg?.dps ?? msg?.status ?? {};
+          if (dps['14']             !== undefined) pathData     = String(dps['14']);
+          if (dps['15']             !== undefined) commandTrans = String(dps['15']);
+          if (dps['path_data']      !== undefined) pathData     = String(dps['path_data']);
+          if (dps['command_trans']  !== undefined) commandTrans = String(dps['command_trans']);
+
+          if (commandTrans !== null && pathData !== null) {
+            clearTimeout(timer);
+            finish(false);
           }
         });
-      });
 
-      client.on('message', (_topic: string, raw: Buffer) => {
-        let msg: any;
-        try { msg = JSON.parse(raw.toString()); } catch { msg = { raw: raw.toString('base64') }; }
-        allMessages.push(msg);
-
-        // DPs come as numeric keys (dpId) or string status codes — handle both
-        const dps: Record<string, any> = msg?.data?.dps ?? msg?.data?.status ?? msg?.dps ?? msg?.status ?? {};
-        if (dps['14']           !== undefined) pathData     = String(dps['14']);
-        if (dps['15']           !== undefined) commandTrans = String(dps['15']);
-        if (dps['path_data']    !== undefined) pathData     = String(dps['path_data']);
-        if (dps['command_trans'] !== undefined) commandTrans = String(dps['command_trans']);
-
-        // Both pieces received → done early
-        if (commandTrans !== null && pathData !== null) {
+        connectedClient.on('error', (err: Error) => {
           clearTimeout(timer);
-          finish(false);
-        }
+          if (!done) { done = true; connectedClient.end(true); reject(new Error(`MQTT: ${err.message}`)); }
+        });
       });
+    }
 
-      client.on('error', (err: Error) => {
-        clearTimeout(timer);
-        if (!done) { done = true; client.end(true); reject(new Error(`MQTT: ${err.message}`)); }
-      });
-    });
+    // All strategies exhausted without connecting
+    return {
+      commandTrans: null, pathData: null, allMessages: [], timedOut: true,
+      elapsedMs: Date.now() - start, brokerUrl, strategiesTried,
+      authError: `All ${strategies.length} auth strategies refused — check credentials or region`,
+    };
   }
 
   async logout(accessToken: string, terminalId: string): Promise<void> {
