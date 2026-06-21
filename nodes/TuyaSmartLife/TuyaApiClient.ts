@@ -37,6 +37,25 @@ export interface FunctionSpec {
   values: string; // JSON string describing allowed values / range
 }
 
+export interface EndpointCandidate {
+  method: string;
+  path: string;
+  params?: Record<string, string>;
+  body?: Record<string, unknown>;
+  category?: string;
+  label?: string;
+}
+
+export interface EndpointResult {
+  endpoint: string;
+  method: string;
+  category?: string;
+  label?: string;
+  success: boolean;
+  result?: any;
+  error?: string;
+}
+
 export class TuyaApiClient {
   private tokenInfo: TokenInfo | null;
   private endpoint: string;
@@ -136,7 +155,471 @@ export class TuyaApiClient {
     return this.tokenInfo;
   }
 
+  // --- Vacuum / Sweeper endpoints (undocumented consumer API — probe all variants) ---
+
+  async probeEndpoints(candidates: EndpointCandidate[]): Promise<EndpointResult[]> {
+    const results: EndpointResult[] = [];
+    for (const c of candidates) {
+      try {
+        const raw = await this.rawRequest(c.method, c.path, c.params, c.body);
+        results.push({
+          endpoint: c.path,
+          method: c.method,
+          category: c.category,
+          label: c.label,
+          success: raw.success,
+          result: raw.result ?? raw,
+          error: raw.success ? undefined : (raw.msg ?? raw.message),
+        });
+      } catch (e: any) {
+        results.push({ endpoint: c.path, method: c.method, category: c.category, label: c.label, success: false, error: e.message });
+      }
+    }
+    return results;
+  }
+
+  async getVacuumCurrentMap(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/map';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/map/current`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/devices/${deviceId}/map/current`, category: cat },
+    ]);
+  }
+
+  async getVacuumMapFileList(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/map-files';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/map/file/list`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/map/file/list`, category: cat },
+    ]);
+  }
+
+  async getVacuumCleaningRecords(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/records';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/sweep/records`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/sweep/records`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/sweep/records`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/sweep/records`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/sweep/devices/${deviceId}/histories`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/histories`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/records`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/devices/${deviceId}/records`, category: cat },
+    ]);
+  }
+
+  async getVacuumAreas(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/areas';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/areas`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/areas`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/areas`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/areas`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/areas`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/areas`, category: cat },
+    ]);
+  }
+
+  async getVacuumRooms(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/rooms';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/rooms`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/rooms`, category: cat },
+    ]);
+  }
+
+  async getVacuumConfigurations(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/configurations';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/configurations`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/configurations`, category: cat },
+      { method: 'GET', path: `/v2.0/m/life/laser/devices/${deviceId}/configurations`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/configurations`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/configurations`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/configurations`, category: cat },
+    ]);
+  }
+
+  async getVacuumDps(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/dps';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/dps`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/dps`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/dps`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/dps`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/dps`, category: cat },
+    ]);
+  }
+
+  async getVacuumSchedules(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'vacuum/schedules';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/laser/devices/${deviceId}/schedules`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/laser/${deviceId}/schedules`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/devices/${deviceId}/schedules`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sweeper/${deviceId}/schedules`, category: cat },
+      { method: 'GET', path: `/v1.0/m/life/sd/${deviceId}/schedules`, category: cat },
+    ]);
+  }
+
+  async probeAllVacuumEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const [map, mapFiles, records, areas, rooms, configs, dps, schedules] = await Promise.all([
+      this.getVacuumCurrentMap(deviceId),
+      this.getVacuumMapFileList(deviceId),
+      this.getVacuumCleaningRecords(deviceId),
+      this.getVacuumAreas(deviceId),
+      this.getVacuumRooms(deviceId),
+      this.getVacuumConfigurations(deviceId),
+      this.getVacuumDps(deviceId),
+      this.getVacuumSchedules(deviceId),
+    ]);
+    return [...map, ...mapFiles, ...records, ...areas, ...rooms, ...configs, ...dps, ...schedules];
+  }
+
+  // --- User endpoints ---
+
+  async probeUserEndpoints(): Promise<EndpointResult[]> {
+    const cat = 'user';
+    return this.probeEndpoints([
+      { method: 'GET', path: '/v1.0/m/life/users/homes', category: cat, label: 'List homes' },
+      { method: 'GET', path: '/v2.0/m/life/users/homes', category: cat, label: 'List homes v2' },
+      { method: 'GET', path: '/v1.0/m/life/users/info', category: cat, label: 'User info' },
+      { method: 'GET', path: '/v1.0/m/life/users/detail', category: cat, label: 'User detail' },
+      { method: 'GET', path: '/v1.0/m/life/users/profile', category: cat, label: 'User profile' },
+      { method: 'GET', path: '/v1.0/m/life/user', category: cat, label: 'User (short path)' },
+      { method: 'GET', path: '/v1.0/m/life/users', category: cat, label: 'Users list' },
+      { method: 'GET', path: '/v2.0/m/life/users/info', category: cat, label: 'User info v2' },
+      { method: 'GET', path: '/v1.0/m/life/users/message-push-setting', category: cat, label: 'Push notification settings' },
+      { method: 'GET', path: '/v1.0/m/life/users/push-config', category: cat, label: 'Push config' },
+      { method: 'GET', path: '/v1.0/m/life/users/devices', category: cat, label: 'All user devices' },
+      { method: 'GET', path: '/v2.0/m/life/users/devices', category: cat, label: 'All user devices v2' },
+    ]);
+  }
+
+  // --- Home Assistant specific endpoints ---
+
+  async probeHaEndpoints(homeId?: string): Promise<EndpointResult[]> {
+    const cat = 'ha';
+    const candidates: EndpointCandidate[] = [
+      { method: 'GET', path: '/v1.0/m/life/ha/home/devices', category: cat, label: 'HA home devices' },
+      { method: 'GET', path: '/v1.0/m/life/ha/homes', category: cat, label: 'HA homes' },
+      { method: 'GET', path: '/v2.0/m/life/ha/home/devices', category: cat, label: 'HA home devices v2' },
+      { method: 'GET', path: '/v1.0/m/life/ha/devices', category: cat, label: 'HA devices' },
+      { method: 'GET', path: '/v2.0/m/life/ha/devices', category: cat, label: 'HA devices v2' },
+    ];
+    if (homeId) {
+      candidates.push(
+        { method: 'GET', path: `/v1.0/m/life/ha/home/${homeId}/devices`, category: cat, label: 'HA home devices by ID' },
+        { method: 'GET', path: `/v2.0/m/life/ha/home/${homeId}/devices`, category: cat, label: 'HA home devices by ID v2' },
+      );
+    }
+    return this.probeEndpoints(candidates);
+  }
+
+  // --- Home endpoints (homeId required) ---
+
+  async probeHomeEndpoints(homeId: string): Promise<EndpointResult[]> {
+    const cat = 'home';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}`, category: cat, label: 'Home details' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}`, category: cat, label: 'Home details v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/details`, category: cat, label: 'Home details (alt)' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/members`, category: cat, label: 'Home members' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/members`, category: cat, label: 'Home members v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/rooms`, category: cat, label: 'Home rooms' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/rooms`, category: cat, label: 'Home rooms v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/devices`, category: cat, label: 'Home devices' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/devices`, category: cat, label: 'Home devices v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/groups`, category: cat, label: 'Device groups' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/groups`, category: cat, label: 'Device groups v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/scenes`, category: cat, label: 'Scenes/rules' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/scenes`, category: cat, label: 'Scenes v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/automations`, category: cat, label: 'Automations' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/automations`, category: cat, label: 'Automations v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/weather`, category: cat, label: 'Home weather' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/weather`, category: cat, label: 'Home weather v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/statistics`, category: cat, label: 'Home statistics' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/safety`, category: cat, label: 'Safety status' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/alarm`, category: cat, label: 'Alarm status' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/messages`, category: cat, label: 'Home messages' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/notice`, category: cat, label: 'Home notices' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/share/devices`, category: cat, label: 'Shared devices' },
+    ]);
+  }
+
+  // --- Generic device endpoints (deviceId required) ---
+
+  async probeDeviceEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'device';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}`, category: cat, label: 'Device info' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}`, category: cat, label: 'Device info v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/status`, category: cat, label: 'Device status' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/status`, category: cat, label: 'Device status v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/functions`, category: cat, label: 'Device functions' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/functions`, category: cat, label: 'Device functions v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/specification`, category: cat, label: 'Device specification' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/specifications`, category: cat, label: 'Device specifications' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/specification`, category: cat, label: 'Device specification v2' },
+      { method: 'GET', path: `/v1.1/m/life/${deviceId}/specifications`, category: cat, label: 'Device specifications v1.1' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/information`, category: cat, label: 'Device information' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/information`, category: cat, label: 'Device information v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/infos`, category: cat, label: 'Device infos (alt)' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/properties`, category: cat, label: 'Device properties' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/properties`, category: cat, label: 'Device properties v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/configurations`, category: cat, label: 'Device configurations' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/configurations`, category: cat, label: 'Device configurations v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/logs`, category: cat, label: 'Device logs' },
+      { method: 'GET', path: `/v2.0/m/life/devices/${deviceId}/logs`, category: cat, label: 'Device logs v2' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/report-logs`, category: cat, label: 'Report logs' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/dp-logs`, category: cat, label: 'DP logs' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/dps`, category: cat, label: 'Raw DPS' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/dp-history`, category: cat, label: 'DP history' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/events`, category: cat, label: 'Device events' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/histories`, category: cat, label: 'Device histories' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/report`, category: cat, label: 'Device report' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/history`, category: cat, label: 'Device history' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/timers`, category: cat, label: 'Device timers' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/schedules`, category: cat, label: 'Device schedules' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/statistics`, category: cat, label: 'Device statistics' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/alarm`, category: cat, label: 'Device alarm status' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/alarms`, category: cat, label: 'Device alarms' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/members`, category: cat, label: 'Device members/sharing' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/share`, category: cat, label: 'Device sharing' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/air-quality`, category: cat, label: 'Air quality data' },
+    ]);
+  }
+
+  // --- Camera / IPC endpoints ---
+
+  async probeCameraEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'camera';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/stream`, category: cat, label: 'Live stream info' },
+      { method: 'GET', path: `/v2.0/m/life/ipc/${deviceId}/stream`, category: cat, label: 'Live stream info v2' },
+      { method: 'GET', path: `/v1.0/m/ipc/${deviceId}/stream`, category: cat, label: 'Live stream (short path)' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/rtsp`, category: cat, label: 'RTSP stream URL' },
+      { method: 'GET', path: `/v2.0/m/life/ipc/${deviceId}/rtsp`, category: cat, label: 'RTSP stream URL v2' },
+      { method: 'GET', path: `/v1.0/m/ipc/${deviceId}/rtsp`, category: cat, label: 'RTSP (short path)' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/playback/records`, category: cat, label: 'Playback records' },
+      { method: 'GET', path: `/v2.0/m/life/ipc/${deviceId}/playback/records`, category: cat, label: 'Playback records v2' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/configs`, category: cat, label: 'Camera configs' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/alarm/list`, category: cat, label: 'Alarm events list' },
+      { method: 'GET', path: `/v2.0/m/life/ipc/${deviceId}/alarm/list`, category: cat, label: 'Alarm events list v2' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/detect/alarm`, category: cat, label: 'Detection alarms' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/snapshot/history`, category: cat, label: 'Snapshot history' },
+      { method: 'GET', path: `/v1.0/m/life/ipc/${deviceId}/devices`, category: cat, label: 'Sub-devices (NVR)' },
+      { method: 'POST', path: `/v1.0/m/life/ipc/${deviceId}/stream/start`, category: cat, label: 'Start stream session' },
+      { method: 'POST', path: `/v1.0/m/life/ipc/${deviceId}/snapshot/trigger`, category: cat, label: 'Trigger snapshot' },
+    ]);
+  }
+
+  // --- Lock endpoints ---
+
+  async probeLockEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'lock';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/records`, category: cat, label: 'Unlock records' },
+      { method: 'GET', path: `/v2.0/m/life/lock/${deviceId}/records`, category: cat, label: 'Unlock records v2' },
+      { method: 'GET', path: `/v1.0/m/life/lock/devices/${deviceId}/records`, category: cat, label: 'Unlock records (alt path)' },
+      { method: 'GET', path: `/v2.0/m/life/lock/devices/${deviceId}/records`, category: cat, label: 'Unlock records (alt) v2' },
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/passwords`, category: cat, label: 'Access codes/passwords' },
+      { method: 'GET', path: `/v2.0/m/life/lock/${deviceId}/passwords`, category: cat, label: 'Access codes v2' },
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/users`, category: cat, label: 'Lock users' },
+      { method: 'GET', path: `/v2.0/m/life/lock/${deviceId}/users`, category: cat, label: 'Lock users v2' },
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/temp-passwords`, category: cat, label: 'Temporary passwords' },
+      { method: 'GET', path: `/v2.0/m/life/lock/${deviceId}/temp-passwords`, category: cat, label: 'Temporary passwords v2' },
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/configurations`, category: cat, label: 'Lock configurations' },
+      { method: 'GET', path: `/v1.0/m/life/lock/${deviceId}/alarm-records`, category: cat, label: 'Lock alarm records' },
+    ]);
+  }
+
+  // --- Infrared / Remote control endpoints ---
+
+  async probeInfraredEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'infrared';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/infrared/${deviceId}/remotes`, category: cat, label: 'IR remotes list' },
+      { method: 'GET', path: `/v2.0/m/life/infrared/${deviceId}/remotes`, category: cat, label: 'IR remotes v2' },
+      { method: 'GET', path: `/v1.0/m/life/ir/${deviceId}/remotes`, category: cat, label: 'IR remotes (short path)' },
+      { method: 'GET', path: `/v1.0/m/life/infrared/${deviceId}/categories`, category: cat, label: 'IR categories' },
+      { method: 'GET', path: `/v2.0/m/life/infrared/${deviceId}/categories`, category: cat, label: 'IR categories v2' },
+      { method: 'GET', path: `/v1.0/m/life/ir/${deviceId}/categories`, category: cat, label: 'IR categories (short path)' },
+      { method: 'GET', path: `/v1.0/m/life/infrared/${deviceId}/brands`, category: cat, label: 'IR brands' },
+      { method: 'GET', path: `/v1.0/m/life/infrared/${deviceId}/keys`, category: cat, label: 'IR keys' },
+      { method: 'GET', path: `/v2.0/m/life/infrared/${deviceId}/keys`, category: cat, label: 'IR keys v2' },
+    ]);
+  }
+
+  // --- Energy monitoring endpoints ---
+
+  async probeEnergyEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'energy';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/energy/devices/${deviceId}/statistics`, category: cat, label: 'Energy statistics' },
+      { method: 'GET', path: `/v2.0/m/energy/devices/${deviceId}/statistics`, category: cat, label: 'Energy statistics v2' },
+      { method: 'GET', path: `/v1.0/m/energy/devices/${deviceId}/day`, category: cat, label: 'Energy by day' },
+      { method: 'GET', path: `/v1.0/m/energy/devices/${deviceId}/month`, category: cat, label: 'Energy by month' },
+      { method: 'GET', path: `/v2.0/m/energy/devices/${deviceId}/month`, category: cat, label: 'Energy by month v2' },
+      { method: 'GET', path: `/v1.0/m/energy/devices/${deviceId}/year`, category: cat, label: 'Energy by year' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/energy`, category: cat, label: 'Device energy (life path)' },
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/energy/statistics`, category: cat, label: 'Energy stats (life path)' },
+    ]);
+  }
+
+  // --- Air quality / environment sensors ---
+
+  async probeAirQualityEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'air-quality';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/air-quality`, category: cat, label: 'Air quality (device path)' },
+      { method: 'GET', path: `/v1.0/m/life/air-quality/${deviceId}`, category: cat, label: 'Air quality' },
+      { method: 'GET', path: `/v2.0/m/life/air-quality/${deviceId}`, category: cat, label: 'Air quality v2' },
+      { method: 'GET', path: `/v1.0/m/life/air-quality/${deviceId}/history`, category: cat, label: 'Air quality history' },
+      { method: 'GET', path: `/v1.0/m/life/air-quality/${deviceId}/statistics`, category: cat, label: 'Air quality statistics' },
+    ]);
+  }
+
+  // --- Scenes and automations (homeId) ---
+
+  async probeSceneEndpoints(homeId: string): Promise<EndpointResult[]> {
+    const cat = 'scenes';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/scenes`, category: cat, label: 'Scenes in home' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/scenes`, category: cat, label: 'Scenes v2' },
+      { method: 'GET', path: `/v1.0/m/life/homes/${homeId}/automations`, category: cat, label: 'Automations' },
+      { method: 'GET', path: `/v2.0/m/life/homes/${homeId}/automations`, category: cat, label: 'Automations v2' },
+      { method: 'GET', path: `/v1.0/m/life/scenes`, category: cat, label: 'Global scenes' },
+      { method: 'GET', path: `/v1.0/m/life/automations`, category: cat, label: 'Global automations' },
+      { method: 'GET', path: `/v1.0/m/life/scenes/${homeId}`, category: cat, label: 'Scenes by home (alt)' },
+    ]);
+  }
+
+  // --- Doorbell endpoints ---
+
+  async probeDoorbellEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'doorbell';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/doorbell/${deviceId}/records`, category: cat, label: 'Doorbell records' },
+      { method: 'GET', path: `/v2.0/m/life/doorbell/${deviceId}/records`, category: cat, label: 'Doorbell records v2' },
+      { method: 'GET', path: `/v1.0/m/life/doorbell/${deviceId}/messages`, category: cat, label: 'Doorbell messages' },
+      { method: 'GET', path: `/v1.0/m/life/doorbell/devices/${deviceId}/records`, category: cat, label: 'Doorbell records (alt)' },
+    ]);
+  }
+
+  // --- HVAC / Thermostat endpoints ---
+
+  async probeHvacEndpoints(deviceId: string): Promise<EndpointResult[]> {
+    const cat = 'hvac';
+    return this.probeEndpoints([
+      { method: 'GET', path: `/v1.0/m/life/hvac/${deviceId}/status`, category: cat, label: 'HVAC status' },
+      { method: 'GET', path: `/v1.0/m/life/hvac/${deviceId}/schedules`, category: cat, label: 'HVAC schedules' },
+      { method: 'GET', path: `/v2.0/m/life/hvac/${deviceId}/status`, category: cat, label: 'HVAC status v2' },
+      { method: 'GET', path: `/v1.0/m/life/hvac/${deviceId}/configurations`, category: cat, label: 'HVAC configurations' },
+      { method: 'GET', path: `/v1.0/m/life/thermostat/${deviceId}/status`, category: cat, label: 'Thermostat status' },
+      { method: 'GET', path: `/v1.0/m/life/thermostat/${deviceId}/schedules`, category: cat, label: 'Thermostat schedules' },
+    ]);
+  }
+
+  // --- Master probe: all known endpoint categories ---
+
+  async probeAllKnownEndpoints(deviceId?: string, homeId?: string): Promise<EndpointResult[]> {
+    const tasks: Promise<EndpointResult[]>[] = [
+      this.probeUserEndpoints(),
+      this.probeHaEndpoints(homeId),
+    ];
+    if (homeId) {
+      tasks.push(this.probeHomeEndpoints(homeId));
+      tasks.push(this.probeSceneEndpoints(homeId));
+    }
+    if (deviceId) {
+      tasks.push(this.probeDeviceEndpoints(deviceId));
+      tasks.push(this.probeCameraEndpoints(deviceId));
+      tasks.push(this.probeLockEndpoints(deviceId));
+      tasks.push(this.probeInfraredEndpoints(deviceId));
+      tasks.push(this.probeEnergyEndpoints(deviceId));
+      tasks.push(this.probeAirQualityEndpoints(deviceId));
+      tasks.push(this.probeDoorbellEndpoints(deviceId));
+      tasks.push(this.probeHvacEndpoints(deviceId));
+      tasks.push(this.probeAllVacuumEndpoints(deviceId));
+    }
+    const all = await Promise.all(tasks);
+    return all.flat();
+  }
+
   // --- Core request method ---
+
+  // Same as request() but never throws on API-level errors (success:false) — used for endpoint probing
+  private async rawRequest(
+    method: string,
+    path: string,
+    params?: Record<string, string>,
+    body?: Record<string, unknown>,
+  ): Promise<any> {
+    await this.refreshTokenIfNeeded();
+
+    const rid = crypto.randomUUID();
+    const sid = '';
+    const refreshToken = this.tokenInfo?.refreshToken ?? '';
+
+    const md5 = crypto.createHash('md5');
+    md5.update(rid + refreshToken, 'utf8');
+    const hashKey = md5.digest('hex');
+
+    const secret = generateSecret(rid, sid, hashKey);
+
+    let queryEncdata = '';
+    if (params && Object.keys(params).length > 0) {
+      queryEncdata = aesGcmEncrypt(JSON.stringify(params), secret);
+    }
+    const actualQueryParams: Record<string, string> = queryEncdata ? { encdata: queryEncdata } : {};
+
+    let bodyEncdata = '';
+    if (body && Object.keys(body).length > 0) {
+      bodyEncdata = aesGcmEncrypt(JSON.stringify(body), secret);
+    }
+    const actualBody: Record<string, string> = bodyEncdata ? { encdata: bodyEncdata } : {};
+
+    const t = Date.now().toString();
+    const headers: Record<string, string> = {
+      'X-appKey': this.clientId,
+      'X-requestId': rid,
+      'X-sid': sid,
+      'X-time': t,
+    };
+    if (this.tokenInfo?.accessToken) {
+      headers['X-token'] = this.tokenInfo.accessToken;
+    }
+    headers['X-sign'] = buildSignature(hashKey, queryEncdata, bodyEncdata, headers);
+
+    const raw = await httpRequest(method, this.endpoint + path, headers, actualQueryParams, actualBody);
+
+    if (raw.success && typeof raw.result === 'string' && raw.result.length > 0) {
+      try {
+        raw.result = JSON.parse(aesGcmDecrypt(raw.result, secret));
+      } catch {
+        raw.result = aesGcmDecrypt(raw.result, secret);
+      }
+    }
+
+    return raw;
+  }
 
   private async request(
     method: string,
