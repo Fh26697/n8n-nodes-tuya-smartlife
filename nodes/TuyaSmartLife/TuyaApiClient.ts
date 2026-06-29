@@ -102,6 +102,15 @@ export interface EnergyQueryResult {
   timedOut: boolean;
   elapsedMs: number;
   pollCount: number;
+  commandNotSupported?: boolean;
+}
+
+export interface MeterStatus {
+  forwardEnergyTotal?: number;
+  reverseEnergyTotal?: number;
+  energyDaily?: Record<string, unknown>;
+  energyMonth?: Record<string, unknown>;
+  raw: Record<string, unknown>;
 }
 
 export class TuyaApiClient {
@@ -821,7 +830,9 @@ export class TuyaApiClient {
   }
 
   // --- Smart Meter (zndb/znjdq) energy DP queries ---
-  // Sends energy_daily command and polls device status until electricTotal appears in the response.
+  // Tries to send energy_daily/energy_month command; if the device rejects it (error 2008 =
+  // "command not supported") it falls back to reading the current device status directly.
+  // Many meters auto-report these DPs without requiring an explicit command.
 
   async requestEnergyDaily(
     deviceId: string,
@@ -834,7 +845,36 @@ export class TuyaApiClient {
   ): Promise<EnergyQueryResult> {
     const start = Date.now();
     const commandValue = JSON.stringify({ startMonth, startDay, endMonth, endDay });
-    await this.sendCommand(deviceId, [{ code: 'energy_daily', value: commandValue }]);
+
+    let commandSent = false;
+    try {
+      await this.sendCommand(deviceId, [{ code: 'energy_daily', value: commandValue }]);
+      commandSent = true;
+    } catch (e: any) {
+      // 2008 = "command or value not supported" — fall back to reading current status
+      if (!String(e.message).includes('2008')) throw e;
+    }
+
+    // If command was rejected, do a single status read and return whatever the device has
+    if (!commandSent) {
+      const status = await this.getDeviceStatus(deviceId);
+      const entry = status.find((s) => s.code === 'energy_daily');
+      let parsed: any = {};
+      try {
+        parsed = typeof entry?.value === 'string' ? JSON.parse(entry.value as string) : (entry?.value ?? {});
+      } catch {}
+      return {
+        electricTotal: parsed.electricTotal ?? 0,
+        startMonth: parsed.startMonth ?? startMonth,
+        startDay: parsed.startDay ?? startDay,
+        endMonth: parsed.endMonth ?? endMonth,
+        endDay: parsed.endDay ?? endDay,
+        timedOut: false,
+        elapsedMs: Date.now() - start,
+        pollCount: 0,
+        commandNotSupported: true,
+      } as EnergyQueryResult & { commandNotSupported: boolean };
+    }
 
     let pollCount = 0;
     while (Date.now() - start < timeoutMs) {
@@ -896,7 +936,34 @@ export class TuyaApiClient {
   ): Promise<EnergyQueryResult> {
     const start = Date.now();
     const commandValue = JSON.stringify({ startYear, startMonth, endYear, endMonth });
-    await this.sendCommand(deviceId, [{ code: 'energy_month', value: commandValue }]);
+
+    let commandSent = false;
+    try {
+      await this.sendCommand(deviceId, [{ code: 'energy_month', value: commandValue }]);
+      commandSent = true;
+    } catch (e: any) {
+      if (!String(e.message).includes('2008')) throw e;
+    }
+
+    if (!commandSent) {
+      const status = await this.getDeviceStatus(deviceId);
+      const entry = status.find((s) => s.code === 'energy_month');
+      let parsed: any = {};
+      try {
+        parsed = typeof entry?.value === 'string' ? JSON.parse(entry.value as string) : (entry?.value ?? {});
+      } catch {}
+      return {
+        electricTotal: parsed.electricTotal ?? 0,
+        startMonth: parsed.startMonth ?? startMonth,
+        endMonth: parsed.endMonth ?? endMonth,
+        startYear: parsed.startYear ?? startYear,
+        endYear: parsed.endYear ?? endYear,
+        timedOut: false,
+        elapsedMs: Date.now() - start,
+        pollCount: 0,
+        commandNotSupported: true,
+      } as EnergyQueryResult & { commandNotSupported: boolean };
+    }
 
     let pollCount = 0;
     while (Date.now() - start < timeoutMs) {
@@ -944,6 +1011,35 @@ export class TuyaApiClient {
       timedOut: true,
       elapsedMs: Date.now() - start,
       pollCount,
+    };
+  }
+
+  async getMeterStatus(deviceId: string): Promise<MeterStatus> {
+    const status = await this.getDeviceStatus(deviceId);
+    const raw: Record<string, unknown> = {};
+    for (const s of status) {
+      let val: unknown = s.value;
+      if (typeof s.value === 'string') {
+        try { val = JSON.parse(s.value); } catch {}
+      }
+      raw[s.code] = val;
+    }
+
+    const parseEnergyDp = (code: string): Record<string, unknown> | undefined => {
+      const v = raw[code];
+      if (v && typeof v === 'object') return v as Record<string, unknown>;
+      return undefined;
+    };
+
+    const fwd = raw['forward_energy_total'];
+    const rev = raw['reverse_energy_total'];
+
+    return {
+      forwardEnergyTotal: typeof fwd === 'number' ? fwd / 100 : undefined,
+      reverseEnergyTotal: typeof rev === 'number' ? rev / 100 : undefined,
+      energyDaily: parseEnergyDp('energy_daily'),
+      energyMonth: parseEnergyDp('energy_month'),
+      raw,
     };
   }
 

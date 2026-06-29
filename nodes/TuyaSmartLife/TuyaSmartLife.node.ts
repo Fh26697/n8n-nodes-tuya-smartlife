@@ -12,7 +12,7 @@ import {
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult, PollMapResult, EnergyQueryResult } from './TuyaApiClient';
+import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult, PollMapResult, EnergyQueryResult, MeterStatus } from './TuyaApiClient';
 
 // File-based token storage — persists across workflows, executions and n8n restarts
 function tokenFilePath(): string {
@@ -286,15 +286,21 @@ export class TuyaSmartLife implements INodeType {
         displayOptions: { show: { resource: ['smartMeter'] } },
         options: [
           {
+            name: 'Get Meter Status',
+            value: 'getMeterStatus',
+            description: 'Read all current energy DPs from device status (forward_energy_total, energy_daily, energy_month, …)',
+            action: 'Get smart meter status',
+          },
+          {
             name: 'Get Energy Daily',
             value: 'getEnergyDaily',
-            description: 'Query daily energy consumption for a date range (energy_daily DP, zndb/znjdq)',
+            description: 'Send energy_daily command and poll for electricTotal response. Falls back to current status if device does not support the command (error 2008).',
             action: 'Get daily energy consumption',
           },
           {
             name: 'Get Energy Monthly',
             value: 'getEnergyMonthly',
-            description: 'Query monthly energy consumption for a date range (energy_month DP, zndb/znjdq)',
+            description: 'Send energy_month command and poll for electricTotal response. Falls back to current status if device does not support the command (error 2008).',
             action: 'Get monthly energy consumption',
           },
         ],
@@ -1127,7 +1133,21 @@ export class TuyaSmartLife implements INodeType {
           const timeoutSec = this.getNodeParameter('timeoutSec', i, 15) as number;
           const timeoutMs = timeoutSec * 1000;
 
-          if (operation === 'getEnergyDaily') {
+          if (operation === 'getMeterStatus') {
+            const status: MeterStatus = await client.getMeterStatus(deviceId);
+            syncTokens();
+            returnData.push({
+              json: {
+                deviceId,
+                forwardEnergyTotal: status.forwardEnergyTotal ?? null,
+                reverseEnergyTotal: status.reverseEnergyTotal ?? null,
+                energyDaily: status.energyDaily ?? null,
+                energyMonth: status.energyMonth ?? null,
+                raw: status.raw,
+              } as unknown as IDataObject,
+            });
+
+          } else if (operation === 'getEnergyDaily') {
             const startMonth = this.getNodeParameter('startMonth', i) as number;
             const startDay   = this.getNodeParameter('startDay',   i) as number;
             const endMonth   = this.getNodeParameter('endMonth',   i) as number;
@@ -1149,6 +1169,7 @@ export class TuyaSmartLife implements INodeType {
                 timedOut: result.timedOut,
                 elapsedMs: result.elapsedMs,
                 pollCount: result.pollCount,
+                commandNotSupported: result.commandNotSupported ?? false,
               } as unknown as IDataObject,
             });
 
@@ -1174,6 +1195,7 @@ export class TuyaSmartLife implements INodeType {
                 timedOut: result.timedOut,
                 elapsedMs: result.elapsedMs,
                 pollCount: result.pollCount,
+                commandNotSupported: result.commandNotSupported ?? false,
               } as unknown as IDataObject,
             });
           }
