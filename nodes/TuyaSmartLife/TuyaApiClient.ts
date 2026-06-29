@@ -91,6 +91,19 @@ export interface EndpointResult {
   error?: string;
 }
 
+export interface EnergyQueryResult {
+  electricTotal: number;
+  startMonth: number;
+  endMonth: number;
+  startDay?: number;
+  endDay?: number;
+  startYear?: number;
+  endYear?: number;
+  timedOut: boolean;
+  elapsedMs: number;
+  pollCount: number;
+}
+
 export class TuyaApiClient {
   private tokenInfo: TokenInfo | null;
   private endpoint: string;
@@ -805,6 +818,133 @@ export class TuyaApiClient {
       { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/energy`, category: cat, label: 'Device energy (life path)' },
       { method: 'GET', path: `/v1.0/m/life/devices/${deviceId}/energy/statistics`, category: cat, label: 'Energy stats (life path)' },
     ]);
+  }
+
+  // --- Smart Meter (zndb/znjdq) energy DP queries ---
+  // Sends energy_daily command and polls device status until electricTotal appears in the response.
+
+  async requestEnergyDaily(
+    deviceId: string,
+    startMonth: number,
+    startDay: number,
+    endMonth: number,
+    endDay: number,
+    timeoutMs = 15_000,
+    pollIntervalMs = 2_000,
+  ): Promise<EnergyQueryResult> {
+    const start = Date.now();
+    const commandValue = JSON.stringify({ startMonth, startDay, endMonth, endDay });
+    await this.sendCommand(deviceId, [{ code: 'energy_daily', value: commandValue }]);
+
+    let pollCount = 0;
+    while (Date.now() - start < timeoutMs) {
+      await sleep(pollIntervalMs);
+      pollCount++;
+
+      const status = await this.getDeviceStatus(deviceId);
+      const entry = status.find((s) => s.code === 'energy_daily');
+      if (!entry) continue;
+
+      let parsed: any;
+      try {
+        parsed = typeof entry.value === 'string' ? JSON.parse(entry.value) : entry.value;
+      } catch { continue; }
+
+      if (
+        parsed.electricTotal !== undefined &&
+        parsed.startMonth === startMonth &&
+        parsed.startDay === startDay &&
+        parsed.endMonth === endMonth &&
+        parsed.endDay === endDay
+      ) {
+        return {
+          electricTotal: parsed.electricTotal,
+          startMonth, startDay, endMonth, endDay,
+          timedOut: false,
+          elapsedMs: Date.now() - start,
+          pollCount,
+        };
+      }
+    }
+
+    const lastStatus = await this.getDeviceStatus(deviceId);
+    const lastEntry = lastStatus.find((s) => s.code === 'energy_daily');
+    let lastParsed: any = {};
+    try {
+      lastParsed = typeof lastEntry?.value === 'string'
+        ? JSON.parse(lastEntry.value as string)
+        : (lastEntry?.value ?? {});
+    } catch {}
+
+    return {
+      electricTotal: lastParsed.electricTotal ?? 0,
+      startMonth, startDay, endMonth, endDay,
+      timedOut: true,
+      elapsedMs: Date.now() - start,
+      pollCount,
+    };
+  }
+
+  async requestEnergyMonthly(
+    deviceId: string,
+    startYear: number,
+    startMonth: number,
+    endYear: number,
+    endMonth: number,
+    timeoutMs = 15_000,
+    pollIntervalMs = 2_000,
+  ): Promise<EnergyQueryResult> {
+    const start = Date.now();
+    const commandValue = JSON.stringify({ startYear, startMonth, endYear, endMonth });
+    await this.sendCommand(deviceId, [{ code: 'energy_month', value: commandValue }]);
+
+    let pollCount = 0;
+    while (Date.now() - start < timeoutMs) {
+      await sleep(pollIntervalMs);
+      pollCount++;
+
+      const status = await this.getDeviceStatus(deviceId);
+      const entry = status.find((s) => s.code === 'energy_month');
+      if (!entry) continue;
+
+      let parsed: any;
+      try {
+        parsed = typeof entry.value === 'string' ? JSON.parse(entry.value) : entry.value;
+      } catch { continue; }
+
+      if (
+        parsed.electricTotal !== undefined &&
+        parsed.startYear === startYear &&
+        parsed.startMonth === startMonth &&
+        parsed.endYear === endYear &&
+        parsed.endMonth === endMonth
+      ) {
+        return {
+          electricTotal: parsed.electricTotal,
+          startMonth, endMonth, startYear, endYear,
+          timedOut: false,
+          elapsedMs: Date.now() - start,
+          pollCount,
+        };
+      }
+    }
+
+    const lastStatus = await this.getDeviceStatus(deviceId);
+    const lastEntry = lastStatus.find((s) => s.code === 'energy_month');
+    let lastParsed: any = {};
+    try {
+      lastParsed = typeof lastEntry?.value === 'string'
+        ? JSON.parse(lastEntry.value as string)
+        : (lastEntry?.value ?? {});
+    } catch {}
+
+    return {
+      electricTotal: lastParsed.electricTotal ?? 0,
+      startMonth, endMonth, startYear, endYear,
+      timedOut: true,
+      elapsedMs: Date.now() - start,
+      pollCount,
+    };
   }
 
   // --- Air quality / environment sensors ---

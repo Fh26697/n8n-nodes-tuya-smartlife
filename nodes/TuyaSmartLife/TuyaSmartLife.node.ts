@@ -12,7 +12,7 @@ import {
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult, PollMapResult } from './TuyaApiClient';
+import { TuyaApiClient, TokenInfo, Command, EndpointResult, MqttMapResult, PollMapResult, EnergyQueryResult } from './TuyaApiClient';
 
 // File-based token storage — persists across workflows, executions and n8n restarts
 function tokenFilePath(): string {
@@ -121,6 +121,7 @@ export class TuyaSmartLife implements INodeType {
           { name: 'Setup', value: 'setup' },
           { name: 'Devices', value: 'devices' },
           { name: 'Device', value: 'device' },
+          { name: 'Smart Meter', value: 'smartMeter' },
           { name: 'Vacuum', value: 'vacuum' },
           { name: 'API Explorer', value: 'apiExplorer' },
         ],
@@ -276,6 +277,126 @@ export class TuyaSmartLife implements INodeType {
         description: 'The ID of the device to control',
         displayOptions: { show: { resource: ['device'], operation: ['sendCommand'] } },
       },
+      // ── Smart Meter operations ────────────────────────────────────────────
+      {
+        displayName: 'Operation',
+        name: 'operation',
+        type: 'options',
+        noDataExpression: true,
+        displayOptions: { show: { resource: ['smartMeter'] } },
+        options: [
+          {
+            name: 'Get Energy Daily',
+            value: 'getEnergyDaily',
+            description: 'Query daily energy consumption for a date range (energy_daily DP, zndb/znjdq)',
+            action: 'Get daily energy consumption',
+          },
+          {
+            name: 'Get Energy Monthly',
+            value: 'getEnergyMonthly',
+            description: 'Query monthly energy consumption for a date range (energy_month DP, zndb/znjdq)',
+            action: 'Get monthly energy consumption',
+          },
+        ],
+        default: 'getEnergyDaily',
+      },
+      {
+        displayName: 'Device ID',
+        name: 'deviceId',
+        type: 'string',
+        default: '',
+        required: true,
+        description: 'ID of the smart meter device (zndb or znjdq category)',
+        displayOptions: { show: { resource: ['smartMeter'] } },
+      },
+      {
+        displayName: 'Start Month',
+        name: 'startMonth',
+        type: 'number',
+        default: 1,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 12 },
+        description: 'Start month (1–12)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyDaily'] } },
+      },
+      {
+        displayName: 'Start Day',
+        name: 'startDay',
+        type: 'number',
+        default: 1,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 31 },
+        description: 'Start day (1–31)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyDaily'] } },
+      },
+      {
+        displayName: 'End Month',
+        name: 'endMonth',
+        type: 'number',
+        default: 1,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 12 },
+        description: 'End month (1–12)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyDaily'] } },
+      },
+      {
+        displayName: 'End Day',
+        name: 'endDay',
+        type: 'number',
+        default: 31,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 31 },
+        description: 'End day (1–31)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyDaily'] } },
+      },
+      {
+        displayName: 'Start Year',
+        name: 'startYear',
+        type: 'number',
+        default: 25,
+        required: true,
+        description: 'Start year as 2-digit number (e.g. 25 for 2025)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyMonthly'] } },
+      },
+      {
+        displayName: 'Start Month',
+        name: 'startMonth',
+        type: 'number',
+        default: 1,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 12 },
+        description: 'Start month (1–12)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyMonthly'] } },
+      },
+      {
+        displayName: 'End Year',
+        name: 'endYear',
+        type: 'number',
+        default: 25,
+        required: true,
+        description: 'End year as 2-digit number (e.g. 25 for 2025)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyMonthly'] } },
+      },
+      {
+        displayName: 'End Month',
+        name: 'endMonth',
+        type: 'number',
+        default: 12,
+        required: true,
+        typeOptions: { minValue: 1, maxValue: 12 },
+        description: 'End month (1–12)',
+        displayOptions: { show: { resource: ['smartMeter'], operation: ['getEnergyMonthly'] } },
+      },
+      {
+        displayName: 'Timeout (Seconds)',
+        name: 'timeoutSec',
+        type: 'number',
+        default: 15,
+        typeOptions: { minValue: 5, maxValue: 60 },
+        description: 'How long to wait for the meter to respond (seconds)',
+        displayOptions: { show: { resource: ['smartMeter'] } },
+      },
+
       // ── Vacuum operations ─────────────────────────────────────────────────
       {
         displayName: 'Operation',
@@ -999,6 +1120,62 @@ export class TuyaSmartLife implements INodeType {
             await client.sendCommand(deviceId, commands);
             syncTokens();
             returnData.push({ json: { success: true, deviceId, commands } });
+          }
+
+        } else if (resource === 'smartMeter') {
+          const deviceId = this.getNodeParameter('deviceId', i) as string;
+          const timeoutSec = this.getNodeParameter('timeoutSec', i, 15) as number;
+          const timeoutMs = timeoutSec * 1000;
+
+          if (operation === 'getEnergyDaily') {
+            const startMonth = this.getNodeParameter('startMonth', i) as number;
+            const startDay   = this.getNodeParameter('startDay',   i) as number;
+            const endMonth   = this.getNodeParameter('endMonth',   i) as number;
+            const endDay     = this.getNodeParameter('endDay',     i) as number;
+
+            const result: EnergyQueryResult = await client.requestEnergyDaily(
+              deviceId, startMonth, startDay, endMonth, endDay, timeoutMs,
+            );
+            syncTokens();
+            returnData.push({
+              json: {
+                deviceId,
+                electricTotal: result.electricTotal,
+                unit: 'kWh',
+                startMonth: result.startMonth,
+                startDay: result.startDay,
+                endMonth: result.endMonth,
+                endDay: result.endDay,
+                timedOut: result.timedOut,
+                elapsedMs: result.elapsedMs,
+                pollCount: result.pollCount,
+              } as unknown as IDataObject,
+            });
+
+          } else if (operation === 'getEnergyMonthly') {
+            const startYear  = this.getNodeParameter('startYear',  i) as number;
+            const startMonth = this.getNodeParameter('startMonth', i) as number;
+            const endYear    = this.getNodeParameter('endYear',    i) as number;
+            const endMonth   = this.getNodeParameter('endMonth',   i) as number;
+
+            const result: EnergyQueryResult = await client.requestEnergyMonthly(
+              deviceId, startYear, startMonth, endYear, endMonth, timeoutMs,
+            );
+            syncTokens();
+            returnData.push({
+              json: {
+                deviceId,
+                electricTotal: result.electricTotal,
+                unit: 'kWh',
+                startYear: result.startYear,
+                startMonth: result.startMonth,
+                endYear: result.endYear,
+                endMonth: result.endMonth,
+                timedOut: result.timedOut,
+                elapsedMs: result.elapsedMs,
+                pollCount: result.pollCount,
+              } as unknown as IDataObject,
+            });
           }
         }
       } catch (error) {
